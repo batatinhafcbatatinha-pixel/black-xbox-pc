@@ -1,0 +1,22 @@
+[
+  {
+    "name": "sub_0021B7D2",
+    "address": "0x0021B7D2",
+    "evidence": "analysis/aot/first-indirect-target.log"
+  },
+  {
+    "name": "sub_0021B7DD",
+    "address": "0x0021B7DD",
+    "evidence": "analysis/aot/second-indirect-target.log"
+  },
+  {
+    "name": "sub_0021E65E",
+    "address": "0x0021E65E",
+    "evidence": "analysis/aot/indirect-0021E65E.log"
+  },
+  {
+    "name": "sub_0021E669",
+    "address": "0x0021E669",
+    "evidence": "analysis/aot/indirect-0021E669.log"
+  }
+]

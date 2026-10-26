@@ -1,0 +1,50 @@
+cmake_minimum_required(VERSION 3.25)
+project(black LANGUAGES C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(XBOXRECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../xboxrecomp" CACHE PATH "Existing toolkit")
+option(BLACK_BUILD_COMPAT_HOST "Build bring-up host with XboxRecomp compatibility/emulation layers" OFF)
+option(BLACK_BUILD_NATIVE_HOST "Build diagnostic AOT host with Win32 kernel and native GPU" ON)
+file(GLOB BLACK_AOT CONFIGURE_DEPENDS "src/recomp/gen/*.c")
+if(NOT BLACK_AOT)
+  message(FATAL_ERROR "Run generate-native.cmd before configuring")
+endif()
+if(BLACK_BUILD_NATIVE_HOST AND NOT BLACK_BUILD_COMPAT_HOST)
+  add_subdirectory("${XBOXRECOMP_DIR}/src/platform" "${CMAKE_BINARY_DIR}/platform")
+  add_subdirectory("${XBOXRECOMP_DIR}/src/kernel" "${CMAKE_BINARY_DIR}/kernel")
+  get_target_property(BLACK_KERNEL_SOURCES xbox_kernel SOURCES)
+  list(FILTER BLACK_KERNEL_SOURCES EXCLUDE REGEX "nv2a_.*\\.c$")
+  set_property(TARGET xbox_kernel PROPERTY SOURCES ${BLACK_KERNEL_SOURCES})
+  add_executable(black_native src/main.c src/native_hardware_boundary.c)
+  target_compile_definitions(black_native PRIVATE BLACK_NATIVE_HOST=1)
+  target_include_directories(black_native PRIVATE src/recomp src/recomp/gen)
+  target_link_libraries(black_native PRIVATE black_aot xbox_kernel)
+endif()
+add_library(black_aot STATIC ${BLACK_AOT} src/integration.c src/native_gpu_calls.c)
+target_include_directories(black_aot PRIVATE src/recomp src/recomp/gen
+  "${XBOXRECOMP_DIR}/include" "${XBOXRECOMP_DIR}/src/kernel")
+target_compile_definitions(black_aot PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+# The default CPU archive has no NV2A/APU emulator library dependency.
+# Native GPU/audio/kernel integration is still required by its external ABI.
+if(BLACK_BUILD_COMPAT_HOST)
+  add_subdirectory("${XBOXRECOMP_DIR}" "${CMAKE_BINARY_DIR}/xboxrecomp")
+  add_executable(black src/main.c)
+  target_include_directories(black PRIVATE src/recomp src/recomp/gen "${XBOXRECOMP_DIR}/include")
+  target_link_libraries(black PRIVATE black_aot xboxrecomp d3d11 dxgi dxguid xinput winmm dbghelp)
+endif()
+if(MSVC)
+  target_compile_options(black_aot PRIVATE /bigobj /GS- /O1)
+  target_compile_definitions(black_aot PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+add_library(black_native_gpu SHARED
+  src/native_gpu/hle_d3d11.c src/native_gpu/hle_draw.c
+  src/native_gpu/hle_vsh.c src/native_gpu/hle_native_present.c
+  src/native_gpu/hle_native_geometry.c src/native_gpu/hle_native_quality.c src/native_gpu/black_gpu_bridge.c
+  src/native_gpu/black_gpu_host.c)
+target_include_directories(black_native_gpu PRIVATE src/native_gpu
+  "${XBOXRECOMP_DIR}/src/d3d")
+target_compile_definitions(black_native_gpu PRIVATE BLACK_GPU_BUILD WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(black_native_gpu PRIVATE d3d11 dxgi dxguid d3dcompiler user32 gdi32 winmm)
+target_include_directories(black_aot PRIVATE src)
+target_link_libraries(black_aot PUBLIC black_native_gpu)

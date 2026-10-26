@@ -1,0 +1,22 @@
+{
+  "title": "Black",
+  "titleId": "45410083",
+  "platform": "Xbox Original",
+  "architecture": "x86",
+  "executable": "default.xbe",
+  "imageBase": "0x00010000",
+  "entryPoint": "0x00025A3F",
+  "tlsAddress": "0x002836E4",
+  "kernelThunkAddress": "0x00282FE0",
+  "sdkBuild": 5849,
+  "libraries": [
+    "XAPILIB",
+    "DSOUND",
+    "XBOXKRNL",
+    "XMV",
+    "LIBCMT",
+    "LIBCPMT",
+    "D3D8LTCG",
+    "XGRAPHCL"
+  ]
+}

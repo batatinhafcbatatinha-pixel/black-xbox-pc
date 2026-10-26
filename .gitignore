@@ -1,0 +1,45 @@
+# Public repository: only hand-written source, scripts, configuration and notes.
+# Never published: disc images, game files, executables, recompiled/generated code,
+# disassembly, Ghidra projects, dumps, captures, saves, logs and builds.
+/*
+!/.gitignore
+!/*.md
+!/*.cmd
+!/*.ps1
+!/*.sh
+!/scripts/
+!/config/
+!/project/
+!/inputs/
+
+**/__pycache__/
+*.pyc
+*.log
+*.csv
+*.bin
+*.elf
+*.iso
+*.chd
+*.xbe
+*.xex
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.pgm
+*.png
+*.ps2
+config/output/
+project/out/
+project/generated/
+project/runner/
+project/runner-chunks/
+project/runner-labels-partial/
+project/gap-functions/
+project/gap-functions.*
+project/sdk-handlers.inc
+project/recovered/
+project/kernel-handlers/
+project/supplemental*/
+**/recomp/gen/
