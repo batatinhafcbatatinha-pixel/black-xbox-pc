@@ -1,3 +1,22 @@
+# Checkpoint — 26/10/2026 noite (Claude): destinos ausentes resolvidos; parada na fronteira de hardware do D3D
+
+- `scripts/recover_missing_functions.py` (no pipeline, generate e build): recupera os destinos diretos ausentes como
+  funções inteiras (com chamadas), seguindo recursivamente os callees novos. A evidência é a própria chamada emitida pelo
+  gerador (a desmontagem `--text-only` não tinha xrefs para DSOUND/D3D/XPP). Resultado: **986 funções recuperadas**,
+  349 → **9 aborts** (todos endereços fora de seções executáveis = lixo de desmontagem). Saída
+  `project/src/recomp/gen/recomp_recovered_funcs.c`, relatório `analysis/aot/recovered-functions.json`.
+  Conta como definidas as funções renomeadas para `*_gpu_original` pelo `wrap_native_gpu.py`.
+- `lower_native_instructions.py` agora também baixa `wbinvd` (bytes conferidos no XBE) para no-op do host; roda depois
+  da recuperação no estágio build. `int3` após checagem falha é pulado como no resto do AOT.
+- `project/CMakeLists.txt`: `/MAP` no black_native → `project/out/black_native.map` para traduzir endereços de crash
+  em `sub_XXXXXXXX` (cdb: `kn`, depois resolver offsets `black_native+0x...` pelo map, base 0x140000000).
+- Boot agora passa do ponto anterior (partições, TDATA/UDATA, save meta) e morre com access violation lendo
+  `0xFD001804` (MMIO da NV2A). Pilha: `Direct3D_CreateDevice` (wrapper observador) → corpo original → `sub_002718F0`
+  (init do device, contém wbinvd) → `D3D_CMiniport_InitHardware` `0x272F35` → `sub_00272F35`/`sub_00273095`.
+  **Decisão pendente:** o bridge da GPU nativa só observa e ainda roda o corpo original do D3D, que fala com o hardware.
+  Precisa trocar as fronteiras de hardware do D3D (InitHardware, KickOff/PFIFO put, fences/BlockOnTime,
+  MakeRequestedSpace) por implementações nativas, ou mudar para substituição completa do D3D8 (como o Street 1).
+
 # Checkpoint e Continuação — Black (USA) Xbox Original Port
 
 **Último checkpoint:** black_aot.lib compilada: 13.358 funções traduzidas, 13.737 símbolos sub_* conferidos contra fontes (inclui destinos ausentes). Sem bibliotecas NV2A/APU ligadas por padrão; 380 destinos e 63 ocorrências de instruções ainda falham explicitamente. Ver analysis/native-integration.json.

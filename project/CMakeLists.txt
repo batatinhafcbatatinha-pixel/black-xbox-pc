@@ -19,6 +19,8 @@ if(BLACK_BUILD_NATIVE_HOST AND NOT BLACK_BUILD_COMPAT_HOST)
   target_compile_definitions(black_native PRIVATE BLACK_NATIVE_HOST=1)
   target_include_directories(black_native PRIVATE src/recomp src/recomp/gen)
   target_link_libraries(black_native PRIVATE black_aot xbox_kernel)
+  # Symbol map for translating crash addresses back to guest functions (sub_XXXXXXXX).
+  target_link_options(black_native PRIVATE /MAP)
 endif()
 add_library(black_aot STATIC ${BLACK_AOT} src/integration.c src/native_gpu_calls.c)
 target_include_directories(black_aot PRIVATE src/recomp src/recomp/gen
