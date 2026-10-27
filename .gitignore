@@ -4,6 +4,7 @@
 /*
 !/.gitignore
 !/.gitattributes
+!/.gitmodules
 !/*.md
 !/*.cmd
 !/*.ps1
@@ -12,6 +13,7 @@
 !/config/
 !/project/
 !/inputs/
+!/xboxrecomp
 
 **/__pycache__/
 *.pyc

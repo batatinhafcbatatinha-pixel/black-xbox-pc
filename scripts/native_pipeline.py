@@ -12,7 +12,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / 'project'
-TOOLKIT = ROOT.parent / 'xboxrecomp'
+from toolkit import TOOLKIT
 EXPECTED = 'df2739c372d254a90aeeccf5971d12097f22d89fbb90db021fda96dd4deb68f6'
 WINDOWS = os.name == 'nt'
 BUILD = Path(os.environ.get('BLACK_BUILD_ROOT', str(PROJECT / ('out' if WINDOWS else 'out-linux')))).resolve()

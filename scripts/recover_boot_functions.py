@@ -6,7 +6,8 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT.parent/'xboxrecomp'))
+from toolkit import TOOLKIT
+sys.path.insert(0, str(TOOLKIT))
 from tools.recomp import config
 from tools.recomp.translator import FunctionTranslator
 
