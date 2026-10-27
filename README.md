@@ -8,16 +8,72 @@ Early work on a port of the original-Xbox game *Black* (USA), built through ahea
 
 ## Status
 
-- **Not playable yet.** The translated game library builds (13,358 functions plus 986 recovered call targets; 9 remaining aborts are disassembly noise outside executable sections).
-- Boot passes partition setup, TDATA/UDATA and save metadata, then stops inside Direct3D device creation when the original D3D code touches NV2A hardware registers.
-- Plan: replace D3D8's hardware boundary with the native Direct3D 8 → Direct3D 11 layer from the FIFA Street port (no NV2A/APU emulation). Black links D3D8 with LTCG, so part of the game writes GPU push-buffer methods directly and needs a native method decoder.
-- The native D3D11 renderer sources are in `project/src/native_gpu/` but currently only observe the original D3D.
+- **Boots and plays natively, no NV2A/APU emulation.** Title, menus, briefings and mission 1 (Veblensk) run at
+  60 fps on Direct3D 11 or Vulkan: world geometry, textures, lighting, weapons, particles, decals, HUD, enemies,
+  pickups, death/restart and the pause menu were checked. Later missions have not been played through yet.
+- The original D3D8 (linked with LTCG) still runs on the CPU, but its hardware boundary is native: device creation,
+  push-buffer kick-off and fences take the library's own GPU-less path, and the D3D11 renderer draws every call.
+  Methods the game writes straight into the push buffer (inlined setters, RenderWare's immediate-mode particles and
+  post passes) are read back and drawn natively.
+- DirectSound runs natively through XAudio2; controller input replaces XInput/XPP without the USB stack.
+
+## Playing
+
+`Jogar-Black.cmd` starts `project\out\black_native.exe` with `game_files\` (your extracted disc).
+
+### PC Settings
+
+Open it with **F1**, **Back + Start** on a controller, or **Back / Backspace / a click** on the "BACK PC SETTINGS"
+button shown on the game's own menus (title, main menu, options, pause). The game pauses while it is open.
+Settings are saved to `black-pc.ini` next to the executable. Defaults: borderless fullscreen at the monitor's
+resolution and refresh rate, vsync on, no frame limit (the game's clock follows real time), internal resolution =
+monitor resolution (no upscaling), 16x anisotropic filtering, Direct3D 11. **Graphics API** switches to **Vulkan**
+(DXVK `d3d11.dll`/`dxgi.dll` in `vulkan\` next to the executable; the build copies them from `third_party/dxvk/`).
+
+### Modern controls (default)
+
+In gameplay the controls follow recent Call of Duty / Battlefield games; on the game's own pages (menus, pause,
+briefings, "press A to continue" prompts) the pad works exactly as the game's prompts say.
+
+| Action | Controller | Keyboard / mouse |
+|---|---|---|
+| Fire | RT | Left button |
+| Aim (hold) | LT | Right button |
+| Grenade | RB | G |
+| Use health pack | LB / D-pad down | Q / H / 4 |
+| Reload (hold: pick up weapon) | X | R |
+| Pick up weapon / interact | A | F / E |
+| Crouch | B | C / Left Ctrl |
+| Melee | R3 | V / middle button |
+| Next / previous weapon | Y / D-pad left | 2, wheel down, mouse 5 / 1, wheel up, mouse 4 |
+| Firing mode | D-pad up | X / B |
+| Suppressor | D-pad right | T |
+| Next music track | L3 | M |
+| Pause / back | Start / Back | Esc / Tab |
+| Move / look | Sticks | W A S D / mouse |
+
+Menus on the keyboard: arrows or W A S D, Enter/Space = confirm, Esc = back. `black-pc.ini`, section `[controles]`:
+`esquema=classico` restores the original Xbox layout, `mira=segurar` passes LT straight to the game's aim button
+(default `alternar` emulates hold-to-aim on the game's toggle), `sensibilidade_mouse=1.0`, `inverter_mouse=1`.
+
+### Test options
+
+`BLACK_SKIP_MOVIES=1` ends every pre-rendered movie at once (F10 or A skips one in normal play);
+`RECOMP_PAD_SCRIPT` / `RECOMP_PAD_LIVE` drive the pad; `RECOMP_FB_DUMP=<prefix> RECOMP_HLE_DUMP_EVERY=<n>` save frames.
+Diagnostics (`BLACK_GPU_TRACE_EVERY`, `BLACK_PB_DUMP`, `BLACK_VSH_DUMP`, `BLACK_WATCH`, `BLACK_MEMSNAP`) are
+described in [CONTINUACAO.md](CONTINUACAO.md).
+
+### Linux
+
+Not yet. The renderer already has the SDL2 + DXVK-native path used by the FIFA Street port; the Black-specific
+host code (audio, input, kernel bridge build) still needs its POSIX side. Until then the Windows build is the
+supported one.
 
 ## What is in this repository
 
 - `scripts/` — ISO inspection/extraction, game-file verification, analysis pipeline, boot/leaf/missing-function recovery, native-instruction lowering and GPU wrapper generation.
 - `config/` — XBE configuration and runtime targets.
-- `project/` — CMake project, integration code and the native GPU layer; translated game code (`src/recomp/gen`) is not included.
+- `project/` — CMake project, integration code, the native D3D/DirectSound/input replacements (`src/native_d3d/`) and the native renderer with PC Settings (`src/native_gpu/`); translated game code (`src/recomp/gen`) is not included.
 - [NOTES.md](NOTES.md) and [CONTINUACAO.md](CONTINUACAO.md) — development log and native plan (in Portuguese).
 
 The scripts expect the author's local workspace (a neighboring `xboxrecomp` checkout).
@@ -35,6 +91,7 @@ Do not upload the ISO, extracted files, generated code or the built executable.
 - Port integration and native layers: [batatinhafcbatatinha-pixel](https://github.com/batatinhafcbatatinha-pixel).
 - [xboxrecomp](https://github.com/sp00nznet/xboxrecomp): Ned Heller / sp00nz and contributors (MIT); the modified snapshot with its notices is published in [fifa-street-pc](https://github.com/batatinhafcbatatinha-pixel/fifa-street-pc).
 - [XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase), used locally to locate XDK library functions.
+- [DXVK](https://github.com/doitsujin/dxvk) (zlib license) for the optional Vulkan path; its DLLs are not committed.
 - Black, its code, trademarks and assets belong to Electronic Arts / Criterion Games and the respective rights holders. This project is not affiliated with or endorsed by EA, Criterion or Microsoft.
 
 ---

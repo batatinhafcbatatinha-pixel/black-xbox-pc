@@ -37,6 +37,10 @@ static int load(const char *path, void **data, size_t *bytes) {
 }
 
 int main(int argc, char **argv) {
+    #ifdef BLACK_NATIVE_HOST
+    extern void xa2_set_volume(float volume);
+    BlackGpuInitOptions(xa2_set_volume);
+    #endif
     /* Caller selects a data directory; no copy or extraction is performed. */
     const char *game = argc > 1 ? argv[1] : "game_files";
     char xbe[MAX_PATH];
@@ -54,8 +58,13 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Cannot initialize Black memory layout\n"); free(data); return 3;
     }
     g_xbox_mem_offset = xbox_GetMemoryOffset();
+    {
+        extern void black_watch_init(void);
+        black_watch_init();
+    }
 #ifdef BLACK_NATIVE_HOST
-    if (!BlackGpuAttachMemory(g_xbox_mem_offset, NULL)) {
+    extern void black_key_event(int key, int down);
+    if (!BlackGpuAttachMemory(g_xbox_mem_offset, black_key_event)) {
         fprintf(stderr, "Cannot attach native GPU memory\n");
         xbox_MemoryLayoutShutdown(); free(data); return 5;
     }

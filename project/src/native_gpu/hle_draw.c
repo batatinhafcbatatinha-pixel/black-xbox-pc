@@ -659,6 +659,22 @@ static ID3D11VertexShader *vs_get(HleVs *v)
         return NULL;
     }
     {
+        /* BLACK_VSH_DUMP=<dir>: the HLSL and microcode of every translated program. */
+        const char *dir = getenv("BLACK_VSH_DUMP");
+        if (dir && *dir) {
+            char path[512];
+            FILE *fp;
+            snprintf(path, sizeof path, "%s/vs_%08X_%016llX.hlsl", dir, v->obj, (unsigned long long)h);
+            if ((fp = fopen(path, "w")) != NULL) {
+                fprintf(fp, "// %u instructions, %s\n", v->n, v->clip_space ? "clip" : "screen");
+                for (i = 0; i < v->n; i++)
+                    fprintf(fp, "// %08X %08X %08X %08X\n", v->code[i][0], v->code[i][1], v->code[i][2], v->code[i][3]);
+                fwrite(src, 1, len, fp);
+                fclose(fp);
+            }
+        }
+    }
+    {
         uint64_t key = fnv(src, len, 0xCBF29CE484222325ull);
         double t0 = now_ms();
         const void *code;
@@ -1681,8 +1697,279 @@ typedef struct {
     uint32_t attr_off[16], attr_fmt[16];
 } CustomStream;
 
+/* Black's D3D8 is LTCG: the game inlines many setters (vertex shader
+ * constants, render states, combiners) as NV097 method writes straight into
+ * the push buffer, so no API call reports them. Before each draw, read the
+ * methods written since the previous one (from the last position up to the
+ * device's PUT, 0x279B50, following JUMPs) and keep the register shadow and
+ * the vertex constants current. Draw methods are not executed here; the API
+ * draws are. BLACK_PB_TRACK=0 disables it. */
+#define PB_PUT_VA 0x279B50u
+static uint32_t s_pb_pos, s_pb_const, s_pb_prog_load;
+static uint32_t s_pb_prog[136][4];
+static int s_pb_on = -1;
+uint64_t g_pb_begins, g_pb_resync;
+
+static void pb_resync(uint32_t at, uint32_t put, uint32_t w, const char *why)
+{
+    g_pb_resync++;
+    if (g_pb_resync <= 16)
+        fprintf(stderr, "[BLACK-PB] track resync (%s) at %08X header %08X put %08X\n", why, at, w, put);
+    s_pb_pos = put;
+}
+
+/* Immediate-mode vertices the game pushes itself (RenderWare's Im2D/Im3D at 0x16C9B0..0x176xxx: particles,
+ * full-screen post passes): SET_VERTEX_DATA* registers between BEGIN_END pairs. The library's lazy state flush
+ * runs right before them, so the device state (shaders, textures, target) is the D3D state of that moment; the
+ * vertices go through the same path as the API's Begin/End. Writing attribute 0 emits a vertex, as on the NV2A. */
+static void draw_custom(uint32_t prim, CustomStream *cs);
+static float (*s_pb_imm)[16][4];
+static uint32_t s_pb_imm_n, s_pb_imm_cap, s_pb_imm_prim;
+uint64_t g_pb_imm_draws;
+
+static void pb_emit_vertex(void)
+{
+    if (!s_pb_imm_prim)
+        return;
+    if (s_pb_imm_n == s_pb_imm_cap) {
+        s_pb_imm_cap = s_pb_imm_cap ? s_pb_imm_cap * 2 : 256;
+        s_pb_imm = (float (*)[16][4])realloc(s_pb_imm, s_pb_imm_cap * sizeof *s_pb_imm);
+    }
+    memcpy(s_pb_imm[s_pb_imm_n++], d.attr, sizeof d.attr);
+}
+
+static void pb_end_primitive(void)
+{
+    CustomStream cs;
+    uint32_t i;
+    if (s_pb_imm_prim && s_pb_imm_n && g_hle.dev) {
+        memset(&cs, 0, sizeof cs);
+        cs.host = (const uint8_t *)s_pb_imm;
+        cs.stride = 256;
+        cs.bytes = s_pb_imm_n * 256;
+        for (i = 0; i < 16; i++) {
+            cs.attr_off[i] = 16 * i;
+            cs.attr_fmt[i] = 0x42;
+        }
+        g_pb_imm_draws++;
+        draw_custom(s_pb_imm_prim, &cs);
+    }
+    s_pb_imm_prim = 0;
+    s_pb_imm_n = 0;
+}
+
+/* SET_VERTEX_DATA2F/2S/4UB/4S/4F (0x1880..0x1AFC). Returns 1 when the method was one of them. */
+static int pb_vertex_data(uint32_t m, uint32_t val)
+{
+    uint32_t reg, comp;
+    float f;
+    if (m >= 0x1880u && m < 0x1900u) {
+        reg = (m - 0x1880u) >> 3; comp = ((m - 0x1880u) >> 2) & 1u;
+        memcpy(&f, &val, 4);
+        d.attr[reg][comp] = f;
+        if (comp == 1u) {
+            d.attr[reg][2] = 0.0f; d.attr[reg][3] = 1.0f;
+            if (!reg) pb_emit_vertex();
+        }
+    } else if (m >= 0x1900u && m < 0x1940u) {
+        reg = (m - 0x1900u) >> 2;
+        d.attr[reg][0] = (float)(int16_t)(val & 0xFFFFu);
+        d.attr[reg][1] = (float)(int16_t)(val >> 16);
+        d.attr[reg][2] = 0.0f; d.attr[reg][3] = 1.0f;
+        if (!reg) pb_emit_vertex();
+    } else if (m >= 0x1940u && m < 0x1980u) {
+        reg = (m - 0x1940u) >> 2;
+        for (comp = 0; comp < 4u; comp++)
+            d.attr[reg][comp] = (float)((val >> (8u * comp)) & 255u) / 255.0f;
+        if (!reg) pb_emit_vertex();
+    } else if (m >= 0x1980u && m < 0x1A00u) {
+        reg = (m - 0x1980u) >> 3; comp = ((m - 0x1980u) >> 2) & 1u;
+        d.attr[reg][2 * comp] = (float)(int16_t)(val & 0xFFFFu);
+        d.attr[reg][2 * comp + 1] = (float)(int16_t)(val >> 16);
+        if (comp == 1u && !reg) pb_emit_vertex();
+    } else if (m >= 0x1A00u && m < 0x1B00u) {
+        reg = (m - 0x1A00u) >> 4; comp = ((m - 0x1A00u) >> 2) & 3u;
+        memcpy(&d.attr[reg][comp], &val, 4);
+        if (comp == 3u && !reg) pb_emit_vertex();
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+static int s_pb_in_track;
+static void pb_track_body(void);
+
+static int pb_enabled(void)
+{
+    if (s_pb_on < 0) {
+        const char *e = getenv("BLACK_PB_TRACK");
+        s_pb_on = !(e && *e == '0');
+    }
+    return s_pb_on;
+}
+
+static void pb_track(void)
+{
+    if (s_pb_in_track)
+        return;                         /* a pushed primitive being drawn from inside the tracker */
+    s_pb_in_track = 1;
+    pb_track_body();
+    s_pb_in_track = 0;
+}
+
+/* Called before every API call the bridge routes (and before Clear/Swap): pushed draws land in order. */
+void hle_draw_pb_sync(void)
+{
+    if (d.ready && g_hle.dev) {
+        EnterCriticalSection(&g_hle.lock);
+        pb_track();
+        LeaveCriticalSection(&g_hle.lock);
+    }
+}
+
+static void pb_track_body(void)
+{
+    uint32_t put, va, budget = 1u << 20;
+    if (s_pb_on < 0) {
+        const char *e = getenv("BLACK_PB_TRACK");
+        s_pb_on = !(e && *e == '0');
+    }
+    if (!s_pb_on)
+        return;
+    {
+        /* Draws in the push buffer (BEGIN_END) against draws this renderer made: the difference is geometry the
+         * game pushed itself. Reported every 600 swaps. */
+        static uint64_t calls, last_swap, base_begins, base_calls;
+        calls = d.draws;
+        {
+            /* BLACK_FOV_LOG=1: projection x scale (|c10.xyz|) every 10 swaps -- zoom/aim shows up here. */
+            static int fov = -1;
+            if (fov < 0) fov = getenv("BLACK_FOV_LOG") != NULL;
+            static float best;
+            if (fov) {
+                float v = sqrtf(d.vsc[10][0] * d.vsc[10][0] + d.vsc[10][1] * d.vsc[10][1] + d.vsc[10][2] * d.vsc[10][2]);
+                if (v > best) best = v;
+                if (g_hle.swaps / 10 != last_swap / 10) {
+                    fprintf(stderr, "[BLACK-FOV] swap %llu %.4f\n", (unsigned long long)g_hle.swaps, best);
+                    best = 0;
+                }
+            }
+        }
+        if (g_hle.swaps / 600 != last_swap / 600) {
+            fprintf(stderr, "[BLACK-PB] swaps %llu: push-buffer begins %llu, renderer draws %llu (pushed immediate %llu), resyncs %llu\n",
+                    (unsigned long long)g_hle.swaps, (unsigned long long)(g_pb_begins - base_begins),
+                    (unsigned long long)(calls - base_calls), (unsigned long long)g_pb_imm_draws, (unsigned long long)g_pb_resync);
+            base_begins = g_pb_begins;
+            base_calls = calls;
+        }
+        last_swap = g_hle.swaps;
+    }
+    put = MEM32(PB_PUT_VA) & 0x0FFFFFFFu;
+    va = s_pb_pos;
+    if (!va) {
+        s_pb_pos = put;
+        return;
+    }
+    {
+        /* BLACK_PB_DUMP=<n>: print the method stream of the first n spans that hold more than one BEGIN_END (the
+         * extra ones are draws the game pushed itself). */
+        static int dumps = -1;
+        if (dumps < 0) { const char *e = getenv("BLACK_PB_DUMP"); dumps = e ? atoi(e) : 0; }
+        if (dumps > 0 && g_hle.swaps > 2400) {
+            uint32_t p = va, begins = 0, guard = 1u << 16;
+            while (p != put && guard--) {
+                uint32_t w = MEM32(0x80000000u | p), c = (w >> 18) & 0x7FFu, k2;
+                if ((w & 3u) == 1u || (w & 0xE0000003u) == 0x20000000u) { p = w & 0x0FFFFFFCu; continue; }
+                for (k2 = 0; k2 < c; k2++)
+                    if (((w & 0x40000000u) ? (w & 0x1FFCu) : (w & 0x1FFCu) + 4 * k2) == 0x17FCu &&
+                        MEM32(0x80000000u | (p + 4 + 4 * k2)))
+                        begins++;
+                p += 4 + 4 * c;
+            }
+            if (begins > 1) {
+                dumps--;
+                fprintf(stderr, "[BLACK-PB] span with %u begins (swap %llu):", begins, (unsigned long long)g_hle.swaps);
+                p = va; guard = 4096;
+                while (p != put && guard--) {
+                    uint32_t w = MEM32(0x80000000u | p), c = (w >> 18) & 0x7FFu, k2;
+                    if ((w & 3u) == 1u || (w & 0xE0000003u) == 0x20000000u) { p = w & 0x0FFFFFFCu; continue; }
+                    fprintf(stderr, " [%04X%s x%u]", w & 0x1FFCu, (w & 0x40000000u) ? "ni" : "", c);
+                    for (k2 = 0; k2 < c && k2 < 6; k2++) fprintf(stderr, " %X", MEM32(0x80000000u | (p + 4 + 4 * k2)));
+                    p += 4 + 4 * c;
+                }
+                fputc('\n', stderr);
+            }
+        }
+    }
+    while (va != put) {
+        uint32_t w = MEM32(0x80000000u | va), count, method, k, end;
+        if (!budget) { pb_resync(va, put, w, "budget"); return; }
+        if ((w & 3u) == 1u) { va = w & 0x0FFFFFFCu; budget--; continue; }                    /* old jump */
+        if ((w & 0xE0000003u) == 0x20000000u) { va = w & 0x0FFFFFFCu; budget--; continue; }  /* jump */
+        if ((w & 3u) == 2u || (w & 0xE0000003u) == 0x40000002u || w == 0x00020000u || (w & 0x80000000u)) {
+            pb_resync(va, put, w, "call/return/bad");
+            return;
+        }
+        count = (w >> 18) & 0x7FFu;
+        method = w & 0x1FFCu;
+        end = va + 4 + 4 * count;
+        if (put > va && put < end) { pb_resync(va, put, w, "overlaps put"); return; }
+        if (budget < count + 1) { pb_resync(va, put, w, "budget"); return; }
+        budget -= count + 1;
+        va += 4;
+        if ((w >> 13) & 7u) {                       /* other subchannels: not 3D state */
+            va = end;
+            continue;
+        }
+        for (k = 0; k < count; k++, va += 4) {
+            uint32_t m = (w & 0x40000000u) ? method : method + 4 * k, val;
+            val = MEM32(0x80000000u | va);
+            if (m >= 0x0B80u && m < 0x0C00u) {
+                uint32_t slot = s_pb_const >> 2, comp = s_pb_const & 3u;
+                if (slot < 192u) {
+                    uint32_t old;
+                    memcpy(&old, &d.vsc[slot][comp], 4);
+                    if (old != val) {
+                        memcpy(&d.vsc[slot][comp], &val, 4);
+                        d.vsc_dirty = 1;
+                    }
+                }
+                s_pb_const++;
+            } else if (m >= 0x0B00u && m < 0x0B80u) {
+                uint32_t slot = s_pb_prog_load >> 2;
+                if (slot < 136u)
+                    s_pb_prog[slot][s_pb_prog_load & 3u] = val;
+                s_pb_prog_load++;
+            } else if (m == 0x1E9Cu) {
+                s_pb_prog_load = val * 4u;
+                d.nv[m >> 2] = val;
+            } else if (m == 0x1EA4u) {
+                s_pb_const = val * 4u;
+                d.nv[m >> 2] = val;
+            } else if (m == 0x1800u || m == 0x1808u || m == 0x1818u) {
+                /* index / inline vertex data */
+            } else if (m == 0x17FCu) {
+                if (val) {
+                    g_pb_begins++;
+                    s_pb_imm_prim = val;
+                    s_pb_imm_n = 0;
+                } else {
+                    s_pb_pos = va + 4;      /* a nested draw must not re-read what is already handled */
+                    pb_end_primitive();
+                }
+                d.nv[m >> 2] = val;
+            } else if (!pb_vertex_data(m, val)) {
+                d.nv[m >> 2] = val;
+            }
+        }
+    }
+    s_pb_pos = va;
+}
+
 static void draw(uint32_t prim, const uint32_t *verts, uint32_t n, const CustomStream *cs)
 {
+    pb_track();
     uint32_t dev = hle_device_va(), vs_obj = MEM32(dev + DEV_VERTEX_SHADER);
     HleSurface *rt = hle_surface_for(MEM32(dev + DEV_RENDER_TARGET));
     HleSurface *ds = hle_surface_for(MEM32(dev + DEV_DEPTH_STENCIL));
@@ -1715,6 +2002,28 @@ static void draw(uint32_t prim, const uint32_t *verts, uint32_t n, const CustomS
         if (!v && warn(4, 8))
             fprintf(stderr, "[HLE-D3D11] draw with unknown vertex shader %08X\n", vs_obj);
         return;
+    }
+    /* BLACK_VSH_CHECK=1: compare the program the push buffer loaded into the slot with the handle's. */
+    static int vsh_check = -1;
+    if (vsh_check < 0) { const char *e = getenv("BLACK_VSH_CHECK"); vsh_check = e && *e == '1'; }
+    if (vsh_check) {
+        static uint64_t same, diff;
+        uint32_t start = d.nv[0x1EA0 >> 2], j;
+        int match = start + v->n <= 136u;
+        for (j = 0; match && j < v->n; j++)
+            if (memcmp(s_pb_prog[start + j], v->code[j], 16)) match = 0;
+        if (match) same++; else {
+            diff++;
+            if (diff <= 12) {
+                fprintf(stderr, "[BLACK-VSH] draw vs %08X n %u: slot program at %u differs (first:", vs_obj, v->n, start);
+                for (j = 0; j < 4 && start + j < 136u; j++)
+                    fprintf(stderr, " %08X%08X%08X%08X/%08X%08X%08X%08X", s_pb_prog[start+j][0], s_pb_prog[start+j][1], s_pb_prog[start+j][2], s_pb_prog[start+j][3],
+                            j < v->n ? v->code[j][0] : 0, j < v->n ? v->code[j][1] : 0, j < v->n ? v->code[j][2] : 0, j < v->n ? v->code[j][3] : 0);
+                fprintf(stderr, ")\n");
+            }
+        }
+        if (((same + diff) & 0xFFFF) == 0)
+            fprintf(stderr, "[BLACK-VSH] slot program matches %llu, differs %llu\n", same, diff);
     }
     if (!(vsh = vs_get(v))) {
         d.skipped++;
@@ -1851,6 +2160,17 @@ static void draw(uint32_t prim, const uint32_t *verts, uint32_t n, const CustomS
     }
     setup_pixels(&pcb);
     {
+        /* Features the native pipeline does not reproduce yet: logged once per kind. */
+        extern uint32_t hle_quality_gaps(uint32_t primitive);
+        static uint32_t seen;
+        uint32_t g = hle_quality_gaps(prim), fresh = g & ~seen;
+        if (fresh) {
+            seen |= g;
+            fprintf(stderr, "[HLE-GAP] new %08X (all %08X) prim %u vs %08X ps %08X texmodes %08X ctl %08X\n",
+                    fresh, seen, prim, vs_obj, d.ps, MEM32(hle_device_va() + 0x790u), pcb.control[0]);
+        }
+    }
+    {
         extern int hle_trace_on(void);
         if (hle_trace_on()) {
             fprintf(stderr, "[HLE-D] draw prim %u n %u vs %08X ps %08X ctl %08X %08X %08X %08X rt %08X ds %s\n",
@@ -1876,6 +2196,72 @@ static void draw(uint32_t prim, const uint32_t *verts, uint32_t n, const CustomS
                 if (d.tex[i])
                     fprintf(stderr, "[HLE-D]   stage %u tex %08X data %08X fmt %08X size %08X pal %08X\n", i,
                             d.tex[i], MEM32(d.tex[i] + 4), MEM32(d.tex[i] + 12), MEM32(d.tex[i] + 16), d.pal[i]);
+            for (i = 0; i < 4; i++)
+                fprintf(stderr, "[HLE-D]   ff %u: %08X %08X %08X %08X scale %g %g\n", i,
+                        pcb.ff[i][0], pcb.ff[i][1], pcb.ff[i][2], pcb.ff[i][3],
+                        pcb.tex_scale[i][0], pcb.tex_scale[i][1]);
+            if (cs) {
+                fprintf(stderr, "[HLE-D]   custom stride %u attrs:", cs->stride);
+                for (i = 0; i < 16; i++)
+                    fprintf(stderr, " %u=%X@%u", i, cs->attr_fmt[i], cs->attr_off[i]);
+                fputc('\n', stderr);
+                fprintf(stderr, "[HLE-D]   declaration:");
+                for (i = 0; i < 16; i++)
+                    if (cs->attr_fmt[i]) fprintf(stderr, " %u=stream%u@%u", i,
+                        MEM32(vs_obj + 20 + 16 * i), MEM32(vs_obj + 24 + 16 * i));
+                fprintf(stderr, " vertex0:");
+                for (i = 0; i < cs->stride / 4 && i < 16; i++) {
+                    uint32_t word;
+                    memcpy(&word, cs->host + 4 * i, 4);
+                    fprintf(stderr, " %08X", word);
+                }
+                fputc('\n', stderr);
+            } else {
+                fprintf(stderr, "[HLE-D]   verts %u %u %u %u %u %u base %u vb %08X data %08X:", verts[0], n > 1 ? verts[1] : 0,
+                        n > 2 ? verts[2] : 0, n > 3 ? verts[3] : 0, n > 4 ? verts[4] : 0, n > 5 ? verts[5] : 0,
+                        MEM32(dev + 0x1Cu), MEM32(G_STREAM + 8), MEM32(G_STREAM + 8) ? MEM32(MEM32(G_STREAM + 8) + 4) : 0);
+                if (MEM32(G_STREAM + 8)) {
+                    uint32_t base = contig(MEM32(MEM32(G_STREAM + 8) + 4)) + MEM32(G_STREAM) * verts[0];
+                    for (i = 0; i < 12; i++) fprintf(stderr, " %08X", MEM32(base + 4 * i));
+                }
+                fputc('\n', stderr);
+                if (MEM32(vs_obj + 28) == 0x32 && MEM32(G_STREAM + 8)) {
+                    /* CPU check of dp4 c10..c13 (the world shader): vertices that land far off screen. */
+                    uint32_t vb0 = contig(MEM32(MEM32(G_STREAM + 8) + 4)), st = MEM32(G_STREAM), bad = 0, j;
+                    float worst = 0;
+                    for (j = 0; j < n; j++) {
+                        uint32_t p = vb0 + st * verts[j] + MEM32(vs_obj + 24);
+                        float x = MEMF(p), y = MEMF(p + 4), z = MEMF(p + 8), cw;
+                        cw = x * d.vsc[13][0] + y * d.vsc[13][1] + z * d.vsc[13][2] + d.vsc[13][3];
+                        float cx = x * d.vsc[10][0] + y * d.vsc[10][1] + z * d.vsc[10][2] + d.vsc[10][3];
+                        if (cw > 0.01f && fabsf(cx / cw) > 4.0f) bad++;
+                        if (fabsf(x) > 1e5f || fabsf(y) > 1e5f || fabsf(z) > 1e5f || x != x) {
+                            bad++; if (fabsf(x) > worst) worst = fabsf(x);
+                            if (bad <= 3)
+                                fprintf(stderr, "[HLE-D]   bad vertex #%u index %u (vmin %u vmax %u) words %08X %08X %08X %08X prev-index %u low %08X %08X %08X\n",
+                                        j, verts[j], vmin, vmax, MEM32(p), MEM32(p + 4), MEM32(p + 8), MEM32(p + 12), j ? verts[j - 1] : 0,
+                                        MEM32(p & 0x0FFFFFFFu), MEM32((p & 0x0FFFFFFFu) + 4), MEM32((p & 0x0FFFFFFFu) + 8));
+                        }
+                    }
+                    fprintf(stderr, "[HLE-D]   cpu check: %u of %u vertices off (worst %g) c10 %g %g %g %g c13 %g %g %g %g\n", bad, n, worst,
+                            d.vsc[10][0], d.vsc[10][1], d.vsc[10][2], d.vsc[10][3], d.vsc[13][0], d.vsc[13][1], d.vsc[13][2], d.vsc[13][3]);
+                }
+                fprintf(stderr, "[HLE-D]   c0-5:");
+                for (i = 0; i < 6; i++)
+                    fprintf(stderr, " (%g %g %g %g)", d.vsc[i][0], d.vsc[i][1], d.vsc[i][2], d.vsc[i][3]);
+                fputc('\n', stderr);
+                fprintf(stderr, "[HLE-D]   streams vmin %u vmax %u attrs:", vmin, vmax);
+                for (i = 0; i < 16; i++) {
+                    uint32_t fmt = MEM32(vs_obj + 28 + 16 * i), sidx = MEM32(vs_obj + 20 + 16 * i) & 15;
+                    if (fmt == 0 || fmt == 2) continue;
+                    fprintf(stderr, " %u=%X s%u@%u/%u", i, fmt, sidx, MEM32(vs_obj + 24 + 16 * i),
+                            MEM32(G_STREAM + 12 * sidx));
+                }
+                fputc('\n', stderr);
+            }
+            fprintf(stderr, "[HLE-D]   TSS0:");
+            for (i = 0; i < 32; i++) fprintf(stderr, " %u=%08X", i, TSS(0, i));
+            fputc('\n', stderr);
         }
     }
     {
@@ -2025,13 +2411,17 @@ static void draw_api(uint32_t prim, uint32_t count, uint32_t indices, uint32_t s
         verts = (uint32_t *)realloc(verts, cap * 4);
     }
     if (indices) {
+        /* SetIndices' BaseVertexIndex (device +0x1C): 0x270A40 adds base * stride to every vertex array offset. */
         const uint16_t *ix = (const uint16_t *)XBOX_PTR(indices);
+        uint32_t base = MEM32(hle_device_va() + 0x1Cu);
         for (i = 0; i < count; i++)
-            verts[i] = ix[i];
+            verts[i] = ix[i] + base;
     } else {
         for (i = 0; i < count; i++)
             verts[i] = start + i;
     }
+    if (hle_trace_on())
+        fprintf(stderr, "[HLE-D] api draw prim %u count %u indices %08X start %u\n", prim, count, indices, start);
     if (s_measure_draws) {
         double t0 = now_ms();
         draw(prim, verts, count, NULL);
@@ -2200,6 +2590,19 @@ void hle_draw_flush(void)
         flush_immediate();
 }
 
+/* Draws run after the library call (phase 1): Black's D3D flushes lazy state (0x2709A0) and writes the vertex
+ * array setup inside DrawIndexedVertices, so the push buffer is only complete for this draw once it returns.
+ * BLACK_DRAW_PHASE=0 restores drawing before the call. */
+static int draw_phase(void)
+{
+    static int phase = -1;
+    if (phase < 0) {
+        const char *e = getenv("BLACK_DRAW_PHASE");
+        phase = e && *e == '0' ? 0 : 1;
+    }
+    return phase;
+}
+
 void hle_native_observe(int id, int depth, int phase, const uint32_t a[6],
                         uint32_t ecx, uint32_t edx, uint32_t eax)
 {
@@ -2246,6 +2649,30 @@ void hle_native_observe(int id, int depth, int phase, const uint32_t a[6],
                     }
                 }
             }
+        }
+        break;
+    case HLE_D3DDevice_DrawVerticesUP:
+        /* (PrimitiveType, VertexCount, pVertexStreamZeroData, stride): the vertices are in game memory at the
+         * call; laid out as the current vertex shader declares them, like an inline array. The D3D primitive
+         * numbers are the NV097 BEGIN_END ones. */
+        if (phase == draw_phase() && depth == 0 && g_hle.dev && a[2] && a[3] && a[1]) {
+            uint32_t vs_obj = MEM32(hle_device_va() + DEV_VERTEX_SHADER);
+            CustomStream cs;
+            memset(&cs, 0, sizeof cs);
+            for (i = 0; i < 16; i++) {
+                uint32_t fmt = MEM32(vs_obj + 28 + 16 * i);
+                if (fmt == 0 || fmt == 2)
+                    continue;
+                /* UP reads the application's stream layout, including skips
+                 * and reordered declarations. Only INLINE_ARRAY is packed in
+                 * register order. Use the same offsets as the VB draw path. */
+                cs.attr_off[i] = MEM32(vs_obj + 24 + 16 * i);
+                cs.attr_fmt[i] = fmt;
+            }
+            cs.host = (const uint8_t *)XBOX_PTR(a[2]);
+            cs.stride = a[3];
+            cs.bytes = a[1] * a[3];
+            draw_custom(a[0], &cs);
         }
         break;
     case HLE_D3DDevice_CreateVertexShader:
@@ -2297,7 +2724,7 @@ void hle_native_observe(int id, int depth, int phase, const uint32_t a[6],
     case HLE_D3DDevice_SetVertexData4f:
     case HLE_D3DDevice_SetVertexDataColor:
         /* D3DVSDE_VERTEX (-1) is the position register and emits a vertex. */
-        if (phase == 0 && depth == 0 && (a[0] < 16 || a[0] == 0xFFFFFFFFu)) {
+        if (phase == 0 && depth == 0 && !pb_enabled() && (a[0] < 16 || a[0] == 0xFFFFFFFFu)) {
             uint32_t reg = a[0] < 16 ? a[0] : 0;
             float *o = d.attr[reg];
             if (id == HLE_D3DDevice_SetVertexDataColor) {
@@ -2324,7 +2751,7 @@ void hle_native_observe(int id, int depth, int phase, const uint32_t a[6],
         }
         break;
     case HLE_D3DDevice_Begin:
-        if (phase == 0 && depth == 0) {
+        if (phase == 0 && depth == 0 && !pb_enabled()) {
             d.imm_prim = a[0];
             d.imm_count = 0;
         }
@@ -2340,11 +2767,11 @@ void hle_native_observe(int id, int depth, int phase, const uint32_t a[6],
         }
         break;
     case HLE_D3DDevice_DrawVertices:
-        if (phase == 0 && depth == 0 && g_hle.dev)
+        if (phase == draw_phase() && depth == 0 && g_hle.dev)
             draw_api(a[0], a[2], 0, a[1]);
         break;
     case HLE_D3DDevice_DrawIndexedVertices:
-        if (phase == 0 && depth == 0 && g_hle.dev)
+        if (phase == draw_phase() && depth == 0 && g_hle.dev)
             draw_api(a[0], a[1], a[2], 0);
         break;
     default:

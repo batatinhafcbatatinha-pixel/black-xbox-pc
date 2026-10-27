@@ -110,6 +110,8 @@ def main():
     subprocess.run([sys.executable, str(ROOT / 'scripts/recover_missing_functions.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'scripts/lower_native_instructions.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'scripts/wrap_native_gpu.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'scripts/make_native_copies.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'scripts/apply_native_overrides.py')], check=True)
     run(['cmake', '-S', PROJECT, '-B', BUILD, '-G', 'Ninja',
          '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_C_COMPILER=clang-cl'], ROOT, 'native-configure.log')
     if args.stage == 'build':

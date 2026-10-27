@@ -66,5 +66,6 @@
 {0x00269BC0u, HLE_D3DSurface_GetDesc, 2, {8,9}, "D3DSurface_GetDesc"},
 {0x0026C780u, HLE_D3DTexture_GetSurfaceLevel2, 2, {8,9}, "D3DTexture_GetSurfaceLevel2"},
 {0x0026C230u, HLE_D3DVertexBuffer_Lock2, 2, {8,9}, "D3DVertexBuffer_Lock2"},
-{0x00269F10u, HLE_D3DDevice_DrawIndexedVertices, 3, {8,0,9}, "D3DDevice_DrawIndexedVertices"},
+{0x00269F10u, HLE_D3DDevice_DrawIndexedVertices, 3, {8,9,10}, "D3DDevice_DrawIndexedVertices"},
 {0x00269E40u, HLE_D3DDevice_DrawVertices, 3, {8,9,10}, "D3DDevice_DrawVertices"},
+{0x00269C90u, HLE_D3DDevice_DrawVerticesUP, 4, {8,9,10,11}, "D3DDevice_DrawVerticesUP"},

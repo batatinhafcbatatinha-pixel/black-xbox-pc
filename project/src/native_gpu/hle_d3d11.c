@@ -62,8 +62,16 @@ extern void xbox_FramebufferKeyEvent(int vk, int down);
 extern volatile int xbox_nv2a_draw_disabled;
 
 #ifdef _WIN32
+int black_mouse_wndproc(HWND h, UINT m, WPARAM w, LPARAM l);
 static LRESULT CALLBACK shadow_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
+    if (g_hle.primary) {
+        int r = black_mouse_wndproc(h, m, w, l);   /* raw mouse for the modern controls */
+        if (r == 2)
+            return TRUE;
+        if (m == WM_INPUT)
+            return DefWindowProcW(h, m, w, l);
+    }
     switch (m) {
     case WM_CLOSE:
         if (g_hle.primary)                /* the game's window: closing quits */
@@ -139,7 +147,7 @@ static DWORD WINAPI shadow_window_thread(LPVOID unused)
         hle_options_initial_window(&style, &r);
     else
         AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    g_hle.hwnd = CreateWindowExW(0, wc.lpszClassName, g_hle.primary ? L"Black 2" : L"Black - HLE D3D11 (sombra)",
+    g_hle.hwnd = CreateWindowExW(0, wc.lpszClassName, g_hle.primary ? L"BLACK" : L"Black - HLE D3D11 (sombra)",
                              style, g_hle.primary ? r.left : CW_USEDEFAULT, g_hle.primary ? r.top : CW_USEDEFAULT,
                              r.right - r.left, r.bottom - r.top, NULL, NULL, wc.hInstance, NULL);
     SetEvent(g_hle.window_ready);
@@ -900,12 +908,11 @@ static int ensure_swapchain(uint32_t w, uint32_t h)
     return 1;
 }
 
-/* The title presents with D3DPRESENT_INTERVAL_DEFAULT, which on the Xbox
- * waits for vblank: its frame loop assumes at most 60 swaps per second.
- * Nothing in the emulated GPU ties flips to vblank, so without this the game
- * runs as fast as the host allows. RECOMP_HLE_FPS=<n> (default 60, 0 = off).
- * The guest CPU is released while waiting so other guest threads run, as
- * they would while the Xbox waits for the flip. */
+/* Optional host presentation cap, independent of VSync. Black's animation
+ * clock uses elapsed RDTSC time (0x82210 -> 0x841A0 / 0x841C0), not a fixed
+ * tick per swap. Default fps=0 disables this wait. See runs/pc-settings for
+ * the comparison of the game clock against wall time at different rates.
+ * The menu holds the game at this boundary, outside the renderer lock. */
 int guest_cpu_suspend(void);
 void guest_cpu_resume(int token);
 static long long s_pace_wait, s_pace_wait_total, s_pace_freq = 1;
@@ -1365,7 +1372,7 @@ void hle_native_swap(uint32_t flags)
             uint64_t draws, skipped, tris;
             hle_draw_stats(&draws, &skipped, &tris);
             double fps = (g_hle.swaps - g_hle.title_swaps) * 1000.0 / (now - g_hle.title_tick);
-            _snwprintf(t, 159, L"Black - %ls%ls | %ux%u | %.1f fps | draws %llu (skip %llu)",
+            _snwprintf(t, 159, L"BLACK - %ls%ls | %ux%u | %.1f fps | draws %llu (skip %llu)",
                        hle_gpu_api() == HLE_API_VULKAN ? L"Vulkan" : L"DirectX 11",
                        g_hle.primary ? L"" : L" (sombra)",
                        rt ? rt->tw : 0, rt ? rt->th : 0, fps,
@@ -1389,6 +1396,8 @@ void hle_native_swap(uint32_t flags)
         s_present_token = 0;
         guest_cpu_resume(token);
     }
+    /* Options and optional host pacing must run outside the renderer lock. */
+    hle_native_pace();
 }
 
 /* An existing colour surface for guest memory at data, or NULL. */

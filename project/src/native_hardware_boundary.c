@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <windows.h>
 static void unsupported(const char *name) {
     fprintf(stderr, "Black native host: unsupported hardware path %s\n", name);
@@ -33,9 +34,18 @@ void xbox_FramebufferWindowSetTitle(const uint16_t *name, int count) {
     title[bytes > 0 ? bytes : 0] = 0;
     fprintf(stderr, "Black native host title: %s\n", title);
 }
-void xbox_FramebufferWindowSet(uint32_t address, uint32_t pitch) {
-    (void)address; (void)pitch; unsupported("xbox_FramebufferWindowSet");
-}
-void xbox_FramebufferWindowStart(void) { unsupported("xbox_FramebufferWindowStart"); }
+/* The scanout window belongs to the emulated framebuffer path; natively the D3D11 renderer presents at Swap, so
+ * the kernel's display-mode notifications have nothing to drive. */
+void xbox_FramebufferWindowSet(uint32_t address, uint32_t pitch) { (void)address; (void)pitch; }
+void xbox_FramebufferWindowStart(void) {}
 int xbox_VideoIsPlaying(void) { unsupported("xbox_VideoIsPlaying"); return 0; }
 int xbox_VideoPlayFile(const char *path) { (void)path; unsupported("xbox_VideoPlayFile"); return 0; }
+
+/* Keyboard state from the native renderer's window, for pad 0 (xboxrecomp usb_gamepad.c / xinput_device.c). */
+static volatile unsigned char s_key_down[256];
+void black_key_event(int key, int down)
+{
+    if (key < 0) { memset((void *)s_key_down, 0, sizeof s_key_down); return; }   /* focus lost */
+    if (key < 256) s_key_down[key] = (unsigned char)(down != 0);
+}
+int xbox_FramebufferKeyDown(int vk) { return (unsigned)vk <= 255 && s_key_down[vk] != 0; }
