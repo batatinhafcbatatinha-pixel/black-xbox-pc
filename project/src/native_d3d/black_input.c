@@ -11,7 +11,7 @@
  *   0x27DD96 XInputOpen(type, port, slot, poll)    0x27DDEC XInputClose(h)
  *   0x27DDF8 XInputGetState(h, state)              0x27DE6B XInputSetState(h, feedback)
  */
-#include <windows.h>
+#include "black_win32.h"
 #include <stdio.h>
 #include <string.h>
 #include "black_native.h"

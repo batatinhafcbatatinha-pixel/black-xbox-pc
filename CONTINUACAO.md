@@ -1,3 +1,20 @@
+# Checkpoint — 27/10/2026 noite (Claude): suporte a Linux, vblank nativo
+
+- **Linux**: o mesmo código compila com clang no Linux (WSL2 Ubuntu 24.04) e roda até a missão 1 (WSLg, Vulkan em
+  llvmpipe, lento mas correto). Janela/entrada/áudio por SDL2, D3D11 pela DXVK native + vkd3d-shader (como no FIFA
+  Street). `build-linux.sh` chama `scripts/native_pipeline.py build` (agora portável: clang, `project/out-linux`,
+  `BLACK_CMAKE_ARGS`, `BLACK_BUILD_JOBS`); `Jogar-Black.sh` abre o jogo. Shims POSIX: `hle_posix_win32.*`,
+  `hle_gdi_posix.*` (do Street 1), `native_d3d/black_win32.h`; leitor de ini e mouse SDL em `black_controls.c` /
+  `black_mouse.c`; no Linux o renderer é biblioteca estática com `g_esp`, `g_xbox_mem_offset` e
+  `guest_cpu_suspend/resume` renomeados (eram cópias privadas da DLL no Windows).
+- **Vblank nativo** (`black_sync.c`): o KEVENT de vblank do device (+0x1DBC, montado pelo próprio D3D) não era
+  sinalizado por ninguém; no Windows as threads do jogo (ex.: laço 0x1FBD80) giravam com dezenas de milhões de
+  `KeWaitForSingleObject` falhando, no Linux o endereço do guest chegava como handle e dava segfault. Uma thread do
+  host agora o sinaliza a 59,94 Hz via `xbox_KeSetGuestEvent` (novo no kernel_bridge do xboxrecomp) com
+  `RECOMP_TITLE_KEVENTS=1` (padrão em main.c). Windows: ~4 mil esperas por intervalo, missão 1 igual.
+- Teste Linux: `RECOMP_PAD_SCRIPT=18000:start,45000:a,55000:a,65000:a,...` (o carregamento sob llvmpipe é mais
+  lento; os tempos do roteiro do Windows caem durante loads).
+
 # Checkpoint — 27/10/2026 tarde (Claude): partículas/pós do push buffer, controles modernos, Vulkan, botão do PC Settings
 
 - `hle_draw.c`: modo imediato que o próprio jogo grava no push buffer (RenderWare Im2D/Im3D em 0x16C9B0..0x176xxx:

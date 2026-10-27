@@ -32,7 +32,7 @@
  * Settings (black-pc.ini next to the executable, [controles]): esquema=moderno|classico, mira=alternar|segurar,
  * sensibilidade_mouse=1.0, inverter_mouse=0. Environment overrides: BLACK_CONTROLS, BLACK_AIM, BLACK_MOUSE_SENS.
  */
-#include <windows.h>
+#include "black_win32.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +41,57 @@
 #include "native_gpu/black_gpu.h"
 
 int xbox_FramebufferKeyDown(int vk);
+
+#ifndef _WIN32
+#include <unistd.h>
+#include <ctype.h>
+#define VK_LCONTROL 0xA2
+#define WHEEL_DELTA 120
+/* The [controles] section of black-pc.ini, read the way GetPrivateProfileString does (key=value lines). */
+static void exe_dir_file(char *out, size_t cap, const char *name)
+{
+    ssize_t n = readlink("/proc/self/exe", out, cap - 1);
+    char *slash;
+    out[n > 0 ? n : 0] = 0;
+    slash = strrchr(out, '/');
+    snprintf(slash ? slash + 1 : out, cap - (size_t)(slash ? slash + 1 - out : 0), "%s", name);
+}
+static void ini_string(const char *section, const char *key, const char *def, char *out, size_t cap, const char *path)
+{
+    char line[256], cur[64] = "";
+    FILE *f = fopen(path, "r");
+    snprintf(out, cap, "%s", def);
+    if (!f)
+        return;
+    while (fgets(line, sizeof line, f)) {
+        char *p = line, *eq, *e;
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '[') {
+            snprintf(cur, sizeof cur, "%s", p + 1);
+            if ((e = strchr(cur, ']')) != NULL) *e = 0;
+            continue;
+        }
+        if (strcasecmp(cur, section) || !(eq = strchr(p, '=')))
+            continue;
+        *eq = 0;
+        for (e = eq - 1; e >= p && isspace((unsigned char)*e); e--) *e = 0;
+        if (strcasecmp(p, key))
+            continue;
+        for (p = eq + 1; isspace((unsigned char)*p); p++) ;
+        for (e = p + strlen(p) - 1; e >= p && isspace((unsigned char)*e); e--) *e = 0;
+        snprintf(out, cap, "%s", p);
+    }
+    fclose(f);
+}
+#define GetPrivateProfileStringA(s, k, d, o, n, p) ini_string((s), (k), (d), (o), (n), (p))
+static int GetPrivateProfileIntA(const char *s, const char *k, int d, const char *p)
+{
+    char v[32], dv[16];
+    snprintf(dv, sizeof dv, "%d", d);
+    ini_string(s, k, dv, v, sizeof v, p);
+    return atoi(v);
+}
+#endif
 
 #define PAGE_PTR      0x002F36ECu       /* active front-end/pause page; 0 in gameplay */
 #define DIM_ALPHA     0x002E2D3Cu       /* screen dimming behind in-game prompts ("PRESS A TO CONTINUE"); ~0 in play */
@@ -82,9 +133,14 @@ static void config(void)
     if (cfg.loaded)
         return;
     cfg.loaded = 1;
+#ifdef _WIN32
     GetModuleFileNameA(NULL, ini, MAX_PATH);
     slash = strrchr(ini, '\\');
     strcpy(slash ? slash + 1 : ini, "black-pc.ini");
+#else
+    (void)slash;
+    exe_dir_file(ini, sizeof ini, "black-pc.ini");
+#endif
     GetPrivateProfileStringA("controles", "esquema", "moderno", v, sizeof v, ini);
     cfg.modern = _stricmp(v, "classico") != 0;
     GetPrivateProfileStringA("controles", "mira", "alternar", v, sizeof v, ini);

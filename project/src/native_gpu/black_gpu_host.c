@@ -4,6 +4,9 @@
 #include "hle_gpu_api.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
+#include <SDL2/SDL.h>
+#endif
 /* Native CPU hosts use preemptive OS threads, with no global guest-CPU lock.
  * A future serialized host must replace this scheduling boundary explicitly. */
 int guest_cpu_suspend(void){return 0;}
@@ -15,7 +18,9 @@ static BlackGpuVolumeCallback s_volume_callback;
 void black_options_volume(float volume) { if (s_volume_callback) s_volume_callback(volume); }
 void BlackGpuInitOptions(BlackGpuVolumeCallback callback) {
     s_volume_callback = callback;
+#ifdef _WIN32
     SetProcessDPIAware();
+#endif
     hle_options_init();
     hle_gpu_api_load();             /* before any D3D11/DXGI call: binds DXVK when Vulkan is chosen */
 }
@@ -27,7 +32,11 @@ void black_options_timing(void) {
     static ULONGLONG start, last;
     if (enabled < 0) enabled = getenv("BLACK_TIMING_TRACE") != NULL;
     if (!enabled) return;
+#ifdef _WIN32
     ULONGLONG now = GetTickCount64();
+#else
+    ULONGLONG now = SDL_GetTicks64();
+#endif
     if (!start) start = now;
     if (now - last < 1000) return;
     last = now;

@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
+#include "black_win32.h"
 static void unsupported(const char *name) {
     fprintf(stderr, "Black native host: unsupported hardware path %s\n", name);
     abort();

@@ -202,6 +202,7 @@ static int sdl_vk(SDL_Keycode k)
 }
 
 void hle_window_sdl_events(SDL_Event *e);   /* hle_options.c: display changes */
+void black_mouse_sdl_event(const SDL_Event *e);
 
 static DWORD shadow_window_thread(LPVOID unused)
 {
@@ -271,6 +272,7 @@ static DWORD shadow_window_thread(LPVOID unused)
                 xbox_FramebufferKeyEvent(-1, 0);
             break;
         }
+        black_mouse_sdl_event(&e);           /* black_mouse.c: the modern controls' mouse */
         hle_window_sdl_events(&e);
     }
     return 0;

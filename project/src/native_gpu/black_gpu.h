@@ -1,7 +1,9 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
-#ifdef BLACK_GPU_BUILD
+#if !defined(_WIN32)
+#define BLACK_GPU_API
+#elif defined(BLACK_GPU_BUILD)
 #define BLACK_GPU_API __declspec(dllexport)
 #else
 #define BLACK_GPU_API __declspec(dllimport)

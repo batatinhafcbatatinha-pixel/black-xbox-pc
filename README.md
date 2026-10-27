@@ -65,9 +65,28 @@ described in [CONTINUACAO.md](CONTINUACAO.md).
 
 ### Linux
 
-Not yet. The renderer already has the SDL2 + DXVK-native path used by the FIFA Street port; the Black-specific
-host code (audio, input, kernel bridge build) still needs its POSIX side. Until then the Windows build is the
-supported one.
+The same sources build natively on Linux (x86-64): the window, input and audio are SDL2 and the renderer's D3D11
+runs on Vulkan through [DXVK native](https://github.com/doitsujin/dxvk), with vkd3d-shader for shaders, as in the
+FIFA Street port. Tested under WSL2 (Ubuntu 24.04, WSLg) from boot to mission 1; a desktop with a real Vulkan
+driver has not been tried yet.
+
+- Packages (Ubuntu/Debian): `clang cmake ninja-build python3 pkg-config libsdl2-dev libsdl2-ttf-dev fonts-dejavu-core`
+  and a Vulkan driver (`mesa-vulkan-drivers` or your GPU vendor's). The translation scripts need
+  [capstone](https://pypi.org/project/capstone/): `python3 -m venv ~/black-py && ~/black-py/bin/pip install capstone`,
+  then run the scripts below with `PYTHON=~/black-py/bin/python` (or that interpreter directly).
+- DXVK native (a release's `usr/` with `include/dxvk` and `lib/libdxvk_{d3d11,dxgi}.so`) and vkd3d (built with
+  `libvkd3d-shader.so`). The defaults are `../third_party/dxvk-native/usr` and `../third_party/vkd3d-inst`
+  next to this folder; otherwise point at them with `BLACK_CMAKE_ARGS`.
+- Translate the game code (`~/black-py/bin/python scripts/native_pipeline.py generate`, with your `default.xbe`
+  here and the `xboxrecomp` checkout next to this folder), then `./build-linux.sh`:
+
+```sh
+PYTHON=~/black-py/bin/python BLACK_CMAKE_ARGS="-DDXVK_NATIVE_DIR=/opt/dxvk-native/usr -DVKD3D_DIR=/opt/vkd3d" ./build-linux.sh
+./Jogar-Black.sh
+```
+
+The binary goes to `project/out-linux/` with DXVK and vkd3d in `lib/` next to it and `black-pc.ini` beside it.
+PC Settings, the controls and the test options above work the same way (on Linux the Graphics API is always Vulkan).
 
 ## What is in this repository
 

@@ -27,11 +27,76 @@
 #include <string.h>
 #include <wchar.h>
 #include <math.h>
+#ifdef _WIN32
 #include <xinput.h>
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
+#else
+/* Linux/macOS: GDI over a DIB (hle_gdi_posix.c), SDL2 for monitors, display
+ * modes, fullscreen and controllers. */
+#include "hle_gdi_posix.h"
+#include <SDL2/SDL.h>
+#define CCHDEVICENAME 32
+#define ERROR_SUCCESS 0
+#define VK_UP 0x26
+#define VK_DOWN 0x28
+#define VK_LEFT 0x25
+#define VK_RIGHT 0x27
+#define VK_RETURN 0x0D
+#define VK_ESCAPE 0x1B
+#define VK_SPACE 0x20
+#define VK_BACK 0x08
+#define VK_F1 0x70
+#define WM_KEYDOWN 0x0100
+#define WM_SYSKEYDOWN 0x0104
+#define WM_SYSKEYUP 0x0105
+#define XINPUT_GAMEPAD_DPAD_UP 0x0001
+#define XINPUT_GAMEPAD_DPAD_DOWN 0x0002
+#define XINPUT_GAMEPAD_DPAD_LEFT 0x0004
+#define XINPUT_GAMEPAD_DPAD_RIGHT 0x0008
+#define XINPUT_GAMEPAD_START 0x0010
+#define XINPUT_GAMEPAD_BACK 0x0020
+#define XINPUT_GAMEPAD_A 0x1000
+#define XINPUT_GAMEPAD_B 0x2000
+typedef struct { WORD wButtons; BYTE bLeftTrigger, bRightTrigger; SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY; } XINPUT_GAMEPAD;
+typedef struct { DWORD dwPacketNumber; XINPUT_GAMEPAD Gamepad; } XINPUT_STATE;
+
+/* The menu's view of controller i, as XInput would give it. */
+static DWORD XInputGetState(DWORD i, XINPUT_STATE *st)
+{
+    static SDL_GameController *pads[4];
+    SDL_GameController *c;
+    int k, n = 0;
+    if (i >= 4)
+        return 1;
+    if (!pads[i] || !SDL_GameControllerGetAttached(pads[i])) {
+        pads[i] = NULL;
+        for (k = 0; k < SDL_NumJoysticks(); k++)
+            if (SDL_IsGameController(k) && n++ == (int)i) {
+                pads[i] = SDL_GameControllerOpen(k);
+                break;
+            }
+        if (!pads[i])
+            return 1;
+    }
+    c = pads[i];
+    SDL_GameControllerUpdate();
+    memset(st, 0, sizeof *st);
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_UP)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_UP;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_DOWN;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_LEFT;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_START)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_START;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_BACK)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_BACK;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_A;
+    if (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B)) st->Gamepad.wButtons |= XINPUT_GAMEPAD_B;
+    st->Gamepad.sThumbLX = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
+    st->Gamepad.sThumbLY = (SHORT)(-1 - SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTY));
+    return ERROR_SUCCESS;
+}
+#endif
 
 extern void xbox_FramebufferKeyEvent(int vk, int down);
 void black_options_volume(float volume);
@@ -254,7 +319,6 @@ void hle_options_init(void)
     } else if (g_opt.aspect && g_opt.scale != 0) {
         _putenv_s("RECOMP_HLE_ASPECT", g_opt.scale == 0 ? "" : k_aspect_env[g_opt.aspect]);
     }
-    g_opt.api = 0; /* Black currently supplies D3D11 only. */
     native_monitor_defaults();
     s_boot = g_opt;
     save_ini();
@@ -271,6 +335,7 @@ typedef struct Monitor {
     RECT rc, work;
     wchar_t device[CCHDEVICENAME];
     wchar_t name[96];
+    int sdl_index;                      /* Linux/macOS: SDL display */
 } Monitor;
 
 static Monitor s_mon[8];
@@ -279,6 +344,7 @@ static int s_rates[24], s_nrates;
 static wchar_t s_gpu_name[8][128];
 static int s_gpu_index[8], s_ngpu = -1;
 
+#ifdef _WIN32
 static BOOL CALLBACK monitor_cb(HMONITOR h, HDC dc, LPRECT r, LPARAM lp)
 {
     MONITORINFOEXW mi;
@@ -326,6 +392,35 @@ static void monitors_refresh(void)
     }
 }
 
+#else
+static void monitors_refresh(void)
+{
+    int i, n = SDL_GetNumVideoDisplays();
+    s_nmon = 0;
+    for (i = 0; i < n && s_nmon < 8; i++) {
+        SDL_Rect r, u;
+        const char *nm = SDL_GetDisplayName(i);
+        Monitor *m = &s_mon[s_nmon];
+        if (SDL_GetDisplayBounds(i, &r) != 0)
+            continue;
+        if (SDL_GetDisplayUsableBounds(i, &u) != 0)
+            u = r;
+        memset(m, 0, sizeof *m);
+        SetRect(&m->rc, r.x, r.y, r.x + r.w, r.y + r.h);
+        SetRect(&m->work, u.x, u.y, u.x + u.w, u.y + u.h);
+        m->sdl_index = i;
+        swprintf(m->name, 96, L"%dx%d (%s)", r.w, r.h, nm ? nm : "?");
+        s_nmon++;
+    }
+    if (!s_nmon) {
+        memset(&s_mon[0], 0, sizeof s_mon[0]);
+        SetRect(&s_mon[0].rc, 0, 0, 1280, 720);
+        s_mon[0].work = s_mon[0].rc;
+        wcscpy(s_mon[0].name, ui_text(L"Principal", L"Primary"));
+        s_nmon = 1;
+    }
+}
+#endif
 
 static Monitor *monitor_current(void)
 {
@@ -363,6 +458,7 @@ float hle_options_native_scale(void)
     return k < 1.0f ? 1.0f : k > 9.0f ? 9.0f : k;
 }
 
+#ifdef _WIN32
 /* Refresh rates the monitor offers at its current resolution. */
 static void rates_refresh(void)
 {
@@ -405,6 +501,38 @@ static int monitor_current_hz(void)
     return 0;
 }
 
+#else
+static void rates_refresh(void)
+{
+    Monitor *m = monitor_current();
+    SDL_DisplayMode cur, dm;
+    int i, j, n;
+    s_nrates = 0;
+    if (SDL_GetDesktopDisplayMode(m->sdl_index, &cur) != 0)
+        return;
+    n = SDL_GetNumDisplayModes(m->sdl_index);
+    for (i = 0; i < n && s_nrates < 24; i++) {
+        if (SDL_GetDisplayMode(m->sdl_index, i, &dm) != 0 || dm.w != cur.w || dm.h != cur.h || dm.refresh_rate <= 1)
+            continue;
+        for (j = 0; j < s_nrates && s_rates[j] != dm.refresh_rate; j++)
+            ;
+        if (j < s_nrates)
+            continue;
+        for (j = s_nrates; j > 0 && s_rates[j - 1] > dm.refresh_rate; j--)
+            s_rates[j] = s_rates[j - 1];
+        s_rates[j] = dm.refresh_rate;
+        s_nrates++;
+    }
+}
+
+static int monitor_current_hz(void)
+{
+    SDL_DisplayMode cur;
+    if (SDL_GetDesktopDisplayMode(monitor_current()->sdl_index, &cur) == 0)
+        return cur.refresh_rate;
+    return 0;
+}
+#endif
 
 static void gpus_refresh(void)
 {
@@ -432,6 +560,7 @@ static volatile LONG s_display_dirty = 1;
 static volatile LONG s_toggle_fullscreen;
 static unsigned s_fs_check;
 
+#ifdef _WIN32
 void hle_options_initial_window(DWORD *style, RECT *r)
 {
     Monitor *m = monitor_current();
@@ -535,6 +664,98 @@ void hle_options_apply_display(uint32_t pw, uint32_t ph)
     }
 }
 
+#else
+void hle_options_initial_window_sdl(int *x, int *y, int *w, int *h, unsigned *flags)
+{
+    Monitor *m = monitor_current();
+    if (g_opt.display) {
+        *x = m->rc.left;
+        *y = m->rc.top;
+        *w = m->rc.right - m->rc.left;
+        *h = m->rc.bottom - m->rc.top;
+        *flags |= g_opt.display == 2 ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_FULLSCREEN_DESKTOP;
+    } else {
+        *x = m->work.left + ((m->work.right - m->work.left) - *w) / 2;
+        *y = m->work.top + ((m->work.bottom - m->work.top) - *h) / 2;
+        if (*y < m->work.top)
+            *y = m->work.top;
+    }
+}
+
+static int s_exclusive_failed;          /* 1 refused, 2 waiting for the focus */
+static int s_dirty;                     /* the menu needs drawing again */
+static Uint32 s_display_event = (Uint32)-1;
+static uint32_t s_pic_w, s_pic_h;
+
+/* Runs on the window thread (SDL wants its window driven from there): the
+ * present path only posts the request. */
+static void display_apply_now(void)
+{
+    SDL_Window *win = (SDL_Window *)g_hle.hwnd;
+    Monitor *m;
+    monitors_refresh();
+    m = monitor_current();
+    if (g_opt.display == 0) {
+        int ww = (int)(s_pic_w ? s_pic_w : 640), wh = (int)(s_pic_h ? s_pic_h : 480);
+        int aw = (m->work.right - m->work.left) * 9 / 10, ah = (m->work.bottom - m->work.top) * 9 / 10;
+        if (ww > aw) { wh = wh * aw / ww; ww = aw; }
+        if (wh > ah) { ww = ww * ah / wh; wh = ah; }
+        SDL_SetWindowFullscreen(win, 0);
+        SDL_SetWindowBordered(win, SDL_TRUE);
+        SDL_SetWindowSize(win, ww, wh);
+        SDL_SetWindowPosition(win, m->work.left + ((m->work.right - m->work.left) - ww) / 2,
+                              m->work.top + ((m->work.bottom - m->work.top) - wh) / 2);
+    } else {
+        SDL_SetWindowFullscreen(win, 0);
+        SDL_SetWindowPosition(win, m->rc.left, m->rc.top);
+        if (g_opt.display == 2) {
+            SDL_DisplayMode want, got;
+            memset(&want, 0, sizeof want);
+            want.w = m->rc.right - m->rc.left;
+            want.h = m->rc.bottom - m->rc.top;
+            want.refresh_rate = g_opt.refresh ? g_opt.refresh : monitor_current_hz();
+            if (SDL_GetClosestDisplayMode(m->sdl_index, &want, &got))
+                SDL_SetWindowDisplayMode(win, &got);
+            s_exclusive_failed = SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN) != 0;
+            if (s_exclusive_failed) {
+                fprintf(stderr, "[OPTIONS] exclusive fullscreen failed (%s): staying borderless\n", SDL_GetError());
+                SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP);
+            } else {
+                fprintf(stderr, "[OPTIONS] exclusive fullscreen %dx%d @ %d Hz\n", got.w, got.h, got.refresh_rate);
+            }
+        } else {
+            SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        }
+    }
+    s_dirty = 1;
+}
+
+void hle_window_sdl_events(SDL_Event *e)
+{
+    if (s_display_event != (Uint32)-1 && e->type == s_display_event)
+        display_apply_now();
+}
+
+void hle_options_apply_display(uint32_t pw, uint32_t ph)
+{
+    SDL_Event e;
+    if (InterlockedExchange(&s_toggle_fullscreen, 0)) {
+        g_opt.display = g_opt.display ? 0 : 1;
+        s_display_dirty = 1;
+        save_ini();
+    }
+    if (!InterlockedExchange(&s_display_dirty, 0) || !g_hle.hwnd)
+        return;
+    if (s_display_event == (Uint32)-1)
+        s_display_event = SDL_RegisterEvents(1);
+    s_pic_w = pw;
+    s_pic_h = ph;
+    memset(&e, 0, sizeof e);
+    e.type = s_display_event;
+    SDL_PushEvent(&e);
+}
+
+#endif
 
 /* ------------------------------------------------------------ the menu */
 
@@ -731,22 +952,46 @@ static void change(int it, int d)
 
 static void leave_fullscreen(void)
 {
+#ifdef _WIN32
     BOOL fs = FALSE;
     EnterCriticalSection(&g_hle.lock);
     if (g_hle.swap && SUCCEEDED(IDXGISwapChain1_GetFullscreenState(g_hle.swap, &fs, NULL)) && fs)
         IDXGISwapChain1_SetFullscreenState(g_hle.swap, FALSE, NULL);
     LeaveCriticalSection(&g_hle.lock);
+#else
+    if (g_hle.hwnd)
+        SDL_SetWindowFullscreen((SDL_Window *)g_hle.hwnd, 0);
+#endif
 }
 
 static void restart_game(void)
 {
+#ifdef _WIN32
     wchar_t exe[MAX_PATH];
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
+#endif
     save_ini();
     env_publish();                              /* the new choices win over the old boot values */
     _putenv_s("RECOMP_OPTIONS_AUTOTEST", "");     /* a scripted test restarts once, not for ever */
     leave_fullscreen();
+#ifndef _WIN32
+    {
+        /* Same process image, same environment (the new choices are in it). */
+        char exe[MAX_PATH];
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        fprintf(stderr, "[OPTIONS] restarting to apply scale %d, aspect %d, api %d, gpu %d, language %d\n",
+                g_opt.scale, g_opt.aspect, g_opt.api, g_opt.adapter, g_opt.language);
+        fflush(stdout);
+        fflush(stderr);
+        if (n > 0) {
+            exe[n] = 0;
+            execl(exe, exe, (char *)NULL);
+        }
+        fprintf(stderr, "[OPTIONS] restart failed\n");
+        return;
+    }
+#else
     GetModuleFileNameW(NULL, exe, MAX_PATH);
     memset(&si, 0, sizeof si);
     si.cb = sizeof si;
@@ -764,6 +1009,7 @@ static void restart_game(void)
         ExitProcess(0);
     }
     fprintf(stderr, "[OPTIONS] restart failed (%lu)\n", (unsigned long)GetLastError());
+#endif
 }
 
 static int row_at(int x, int y)
@@ -1391,7 +1637,11 @@ static void item_text(int it, wchar_t *label, wchar_t *value, int *greyed)
         break;
     case IT_GPU:
         wcscpy(label, ui_text(L"Placa de vídeo", L"Graphics card"));
+#ifdef _WIN32
         wcscpy(value, ui_text(L"Automática (padrão do Windows)", L"Automatic (Windows default)"));
+#else
+        wcscpy(value, ui_text(L"Automática (padrão do sistema)", L"Automatic (system default)"));
+#endif
         for (i = 0; i < s_ngpu && g_opt.api == s_boot.api; i++)
             if (s_gpu_index[i] == g_opt.adapter)
                 wcscpy(value, s_gpu_name[i]);
@@ -1431,7 +1681,7 @@ static const wchar_t *item_help(int it)
     case IT_API: return !hle_gpu_d3d11_available() ? ui_text(L"Neste sistema o jogo desenha com Vulkan (DXVK).", L"This system renders the game with Vulkan (DXVK).")
                       : hle_gpu_vulkan_available()
                         ? ui_text(L"DirectX 11 ou Vulkan (pela DXVK). A imagem é a mesma; use a que rodar melhor na sua placa.", L"DirectX 11 or Vulkan (DXVK). Choose whichever performs better on your GPU.")
-                        : ui_text(L"Este port usa DirectX 11.", L"This port uses DirectX 11.");
+                        : ui_text(L"Vulkan precisa do driver Vulkan da placa e da pasta vulkan ao lado do jogo.", L"Vulkan requires a Vulkan driver and the vulkan folder next to the game.");
     case IT_GPU: return ui_text(L"Placa de vídeo usada para desenhar o jogo.", L"Graphics card used to render the game.");
     case IT_UI_LANG: return ui_text(L"Idioma deste menu de configurações. A mudança é imediata.", L"Language of this settings menu. Changes apply immediately.");
     case IT_LANG: return ui_text(L"Idioma dos textos e narração do jogo.", L"Game language supported by the installed game resources.");
