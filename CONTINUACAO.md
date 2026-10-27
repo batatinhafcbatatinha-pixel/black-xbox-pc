@@ -14,6 +14,11 @@
   `RECOMP_TITLE_KEVENTS=1` (padrão em main.c). Windows: ~4 mil esperas por intervalo, missão 1 igual.
 - Teste Linux: `RECOMP_PAD_SCRIPT=18000:start,45000:a,55000:a,65000:a,...` (o carregamento sob llvmpipe é mais
   lento; os tempos do roteiro do Windows caem durante loads).
+- **xboxrecomp em fork**: as mudanças locais do toolkit (kernel, NV2A, APU/DSP, input, recompilador) estão em
+  `batatinhafcbatatinha-pixel/xboxrecomp`, branch `ports` (padrão), sobre a v0.13.1; o `main` do fork espelha o
+  upstream (já na v0.16.0). Aqui é o submódulo `xboxrecomp/`; scripts (`scripts/toolkit.py`) e CMake usam o
+  submódulo quando populado, senão o `../xboxrecomp` vizinho (o workspace local continua assim, submódulo em
+  deinit). **Nunca enviar nada ao upstream sp00nznet**: remote `upstream` só com fetch (push desativado).
 
 # Checkpoint — 27/10/2026 tarde (Claude): partículas/pós do push buffer, controles modernos, Vulkan, botão do PC Settings
 

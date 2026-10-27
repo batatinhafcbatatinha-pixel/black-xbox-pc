@@ -78,7 +78,7 @@ driver has not been tried yet.
   `libvkd3d-shader.so`). The defaults are `../third_party/dxvk-native/usr` and `../third_party/vkd3d-inst`
   next to this folder; otherwise point at them with `BLACK_CMAKE_ARGS`.
 - Translate the game code (`~/black-py/bin/python scripts/native_pipeline.py generate`, with your `default.xbe`
-  here and the `xboxrecomp` checkout next to this folder), then `./build-linux.sh`:
+  here), then `./build-linux.sh`:
 
 ```sh
 PYTHON=~/black-py/bin/python BLACK_CMAKE_ARGS="-DDXVK_NATIVE_DIR=/opt/dxvk-native/usr -DVKD3D_DIR=/opt/vkd3d" ./build-linux.sh
@@ -94,8 +94,9 @@ PC Settings, the controls and the test options above work the same way (on Linux
 - `config/` — XBE configuration and runtime targets.
 - `project/` — CMake project, integration code, the native D3D/DirectSound/input replacements (`src/native_d3d/`) and the native renderer with PC Settings (`src/native_gpu/`); translated game code (`src/recomp/gen`) is not included.
 - [NOTES.md](NOTES.md) and [CONTINUACAO.md](CONTINUACAO.md) — development log and native plan (in Portuguese).
-
-The scripts expect the author's local workspace (a neighboring `xboxrecomp` checkout).
+- `xboxrecomp/` — the toolkit, as a submodule: [batatinhafcbatatinha-pixel/xboxrecomp](https://github.com/batatinhafcbatatinha-pixel/xboxrecomp),
+  branch `ports`. Clone with `git clone --recursive` (or run `git submodule update --init` afterwards). Without the
+  submodule, the scripts and CMake fall back to an `xboxrecomp` checkout next to this folder.
 
 ## Your game files
 
@@ -108,7 +109,7 @@ Do not upload the ISO, extracted files, generated code or the built executable.
 ## Credits and licenses
 
 - Port integration and native layers: [batatinhafcbatatinha-pixel](https://github.com/batatinhafcbatatinha-pixel).
-- [xboxrecomp](https://github.com/sp00nznet/xboxrecomp): Ned Heller / sp00nz and contributors (MIT); the modified snapshot with its notices is published in [fifa-street-pc](https://github.com/batatinhafcbatatinha-pixel/fifa-street-pc).
+- [xboxrecomp](https://github.com/sp00nznet/xboxrecomp): Ned Heller / sp00nz and contributors (MIT); the modified copy these ports use is the fork [batatinhafcbatatinha-pixel/xboxrecomp](https://github.com/batatinhafcbatatinha-pixel/xboxrecomp) (branch `ports`, on top of v0.13.1). The fork also carries xemu's DSP sources (GPL-2.0/LGPL-2.1).
 - [XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase), used locally to locate XDK library functions.
 - [DXVK](https://github.com/doitsujin/dxvk) (zlib license) for the optional Vulkan path; its DLLs are not committed.
 - Black, its code, trademarks and assets belong to Electronic Arts / Criterion Games and the respective rights holders. This project is not affiliated with or endorsed by EA, Criterion or Microsoft.
