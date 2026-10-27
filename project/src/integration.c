@@ -5,8 +5,10 @@
 #include "recomp_types.h"
 #include "recovered_indirect.h"
 
+recomp_func_t black_recovered_funcs_lookup(uint32_t va);   /* scripts/recover_missing_functions.py */
 recomp_func_t recomp_lookup_manual(uint32_t va) {
-    return black_recovered_lookup(va);
+    recomp_func_t fn = black_recovered_lookup(va);
+    return fn ? fn : black_recovered_funcs_lookup(va);
 }
 void recomp_icall_fail_log(uint32_t va) {
     fprintf(stderr, "Black: untranslated indirect target 0x%08X\n", va);

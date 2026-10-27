@@ -32,6 +32,7 @@
 *.ps2
 config/output/
 project/out/
+project/out-*/
 project/generated/
 project/runner/
 project/runner-chunks/

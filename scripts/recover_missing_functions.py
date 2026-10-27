@@ -32,7 +32,7 @@ def defined_names():
         if path in (STUBS, OUT):
             continue
         # wrap_native_gpu.py renames GPU-bound bodies to *_gpu_original; the wrapper keeps the plain name.
-        names.update(re.findall(r'^void (sub_[0-9A-F]{8})(?:_gpu_original)?\(void\)\s*\{?\s*$',
+        names.update(re.findall(r'^void (sub_[0-9A-F]{8})(?:_gpu_original)?(?:_gen)?\(void\)\s*\{?\s*$',
                                 path.read_text(encoding='utf-8'), re.M))
     return names
 
@@ -53,6 +53,48 @@ def main():
         if (ROOT / 'analysis/aot/recovered-functions.json').exists() else {}
     worklist = [int(a, 16) for _, a in STUB_RE.findall(stub_text)]
     worklist += [int(r['address'], 16) for r in previous.get('recovered', [])]
+    # Entry points reached only indirectly: the D3D API table the native GPU binds (render-state setters are
+    # called through the library's own tables) and indirect targets observed at run time.
+    bindings = json.loads((ROOT / 'analysis/native-gpu-bindings.json').read_text())['apiSymbols']
+    worklist += [int(b['address'], 16) for b in bindings]
+    runtime_targets = ROOT / 'config/runtime-targets.json'
+    if runtime_targets.exists():
+        worklist += [int(r['address'], 16) for r in json.loads(runtime_targets.read_text())]
+    # Code pointers stored in data (COM vtables, callback tables) that land outside every known function.
+    extents = sorted((a, f['end']) for a, f in db.items())
+    ext_starts = [a for a, _ in extents]
+
+    def inside_known(va):
+        i = bisect.bisect_right(ext_starts, va) - 1
+        return i >= 0 and extents[i][0] <= va < extents[i][1]
+
+    code = [(s.va, s.va + s.raw_size) for s in config._SECTIONS if s.is_code]
+    data_seeds = set()
+    for s in config._SECTIONS:
+        if not s.raw_size:
+            continue
+        raw = data[s.raw_addr:s.raw_addr + s.raw_size] if hasattr(s, 'raw_addr') else b''
+        for off in range(0, len(raw) - 3, 4):
+            # In code sections only tables that sit outside every known function (XPP's driver tables).
+            if s.is_code and inside_known(s.va + off):
+                continue
+            v = int.from_bytes(raw[off:off + 4], 'little')
+            if any(lo <= v < hi for lo, hi in code) and not inside_known(v):
+                data_seeds.add(v)
+    # Code addresses used as immediates by translated code (callbacks registered with `push imm` / `mov reg, imm`),
+    # not return addresses pushed for calls.
+    ret_push = re.compile(r'PUSH32\(esp, 0x([0-9A-F]{8})u\); (?:RECOMP_ABI_CALL|RECOMP_ICALL|\{)')
+    imm = re.compile(r'(?:PUSH32\(esp, |= )0x([0-9A-F]{5,8})u?[;)]')
+    for path in GEN.glob('recomp_*.c'):
+        if path in (STUBS, OUT):
+            continue
+        text = path.read_text(encoding='utf-8', errors='replace')
+        returns = {int(a, 16) for a in ret_push.findall(text)}
+        for a in imm.findall(text):
+            v = int(a, 16)
+            if v not in returns and any(lo <= v < hi for lo, hi in code) and not inside_known(v):
+                data_seeds.add(v)
+    worklist += sorted(data_seeds)
     defined = defined_names()
     seen, accepted, rejected, bodies = set(), [], [], []
     while worklist:
@@ -97,6 +139,11 @@ def main():
                     for callee in set(re.findall(r'\bsub_([0-9A-F]{8})\b', body)):
                         if f'sub_{callee}' not in defined:
                             worklist.append(int(callee, 16))
+                    returns = {int(a, 16) for a in ret_push.findall(body)}
+                    for a in imm.findall(body):
+                        v = int(a, 16)
+                        if v not in returns and any(lo <= v < hi for lo, hi in code) and not inside_known(v):
+                            worklist.append(v)
                 elif not reason:
                     reason = 'Translator produced no body'
         if reason:
@@ -115,8 +162,12 @@ def main():
                    for n, a in sorted(keep.items())]
     STUBS.write_text('\n'.join(stub_lines) + '\n', encoding='utf-8')
     prototypes = ''.join(f'void {n}(void);\n' for n in sorted(referenced | {r["name"] for r in accepted}))
+    # Any recovered function may also be reached through a pointer: give the indirect dispatcher all of them.
+    lookup = ('recomp_func_t black_recovered_funcs_lookup(uint32_t va)\n{\n    switch (va) {\n' +
+              ''.join(f'    case {r["address"]}u: return {r["name"]};\n' for r in accepted) +
+              '    default: return NULL;\n    }\n}\n')
     OUT.write_text('#define RECOMP_GENERATED_CODE\n#include "recomp_funcs.h"\n#include <math.h>\n\n' + prototypes +
-                   '\n' + '\n\n'.join(bodies) + '\n', encoding='utf-8')
+                   '\n' + '\n\n'.join(bodies) + '\n\n' + lookup, encoding='utf-8')
     (ROOT / 'analysis/aot/recovered-functions.json').write_text(json.dumps(dict(
         sourceSha256=EXPECTED, recovered=accepted, rejected=rejected, remainingAborts=len(keep),
         limitations=['Static recovery; runtime reachability and behaviour unvalidated.']), indent=2) + '\n')

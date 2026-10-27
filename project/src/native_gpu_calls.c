@@ -119,6 +119,17 @@ void sub_00269BC0(void) {
     recomp_unimpl("Native GPU post-call failed",0x00269BC0u);
   --black_gpu_call_depth;
 }
+extern void sub_00269C90_gpu_original(void);
+void sub_00269C90(void) {
+  BlackGpuCall before; capture(&before,4);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x00269C90u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x00269C90u);
+  sub_00269C90_gpu_original();
+  if(BlackGpuRoute(0x00269C90u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x00269C90u);
+  --black_gpu_call_depth;
+}
 extern void sub_00269E40_gpu_original(void);
 void sub_00269E40(void) {
   BlackGpuCall before; capture(&before,3);
@@ -132,7 +143,7 @@ void sub_00269E40(void) {
 }
 extern void sub_00269F10_gpu_original(void);
 void sub_00269F10(void) {
-  BlackGpuCall before; capture(&before,2);
+  BlackGpuCall before; capture(&before,3);
   int depth=black_gpu_call_depth++;
   if(BlackGpuRoute(0x00269F10u,0,depth,&before,g_eax)<0)
     recomp_unimpl("Native GPU host not attached",0x00269F10u);
@@ -372,6 +383,61 @@ void sub_0026D170(void) {
     recomp_unimpl("Native GPU post-call failed",0x0026D170u);
   --black_gpu_call_depth;
 }
+extern void sub_0026DBB0_gpu_original(void);
+void sub_0026DBB0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DBB0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DBB0u);
+  sub_0026DBB0_gpu_original();
+  if(BlackGpuRoute(0x0026DBB0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DBB0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026DBF0_gpu_original(void);
+void sub_0026DBF0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DBF0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DBF0u);
+  sub_0026DBF0_gpu_original();
+  if(BlackGpuRoute(0x0026DBF0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DBF0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026DC30_gpu_original(void);
+void sub_0026DC30(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DC30u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DC30u);
+  sub_0026DC30_gpu_original();
+  if(BlackGpuRoute(0x0026DC30u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DC30u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026DC90_gpu_original(void);
+void sub_0026DC90(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DC90u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DC90u);
+  sub_0026DC90_gpu_original();
+  if(BlackGpuRoute(0x0026DC90u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DC90u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026DD10_gpu_original(void);
+void sub_0026DD10(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DD10u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DD10u);
+  sub_0026DD10_gpu_original();
+  if(BlackGpuRoute(0x0026DD10u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DD10u);
+  --black_gpu_call_depth;
+}
 extern void sub_0026DD60_gpu_original(void);
 void sub_0026DD60(void) {
   BlackGpuCall before; capture(&before,1);
@@ -381,6 +447,17 @@ void sub_0026DD60(void) {
   sub_0026DD60_gpu_original();
   if(BlackGpuRoute(0x0026DD60u,1,depth,&before,g_eax)<0)
     recomp_unimpl("Native GPU post-call failed",0x0026DD60u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026DDB0_gpu_original(void);
+void sub_0026DDB0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DDB0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DDB0u);
+  sub_0026DDB0_gpu_original();
+  if(BlackGpuRoute(0x0026DDB0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DDB0u);
   --black_gpu_call_depth;
 }
 extern void sub_0026DE50_gpu_original(void);
@@ -416,6 +493,17 @@ void sub_0026DF80(void) {
     recomp_unimpl("Native GPU post-call failed",0x0026DF80u);
   --black_gpu_call_depth;
 }
+extern void sub_0026DFF0_gpu_original(void);
+void sub_0026DFF0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026DFF0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026DFF0u);
+  sub_0026DFF0_gpu_original();
+  if(BlackGpuRoute(0x0026DFF0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026DFF0u);
+  --black_gpu_call_depth;
+}
 extern void sub_0026E060_gpu_original(void);
 void sub_0026E060(void) {
   BlackGpuCall before; capture(&before,1);
@@ -425,6 +513,204 @@ void sub_0026E060(void) {
   sub_0026E060_gpu_original();
   if(BlackGpuRoute(0x0026E060u,1,depth,&before,g_eax)<0)
     recomp_unimpl("Native GPU post-call failed",0x0026E060u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E0F0_gpu_original(void);
+void sub_0026E0F0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E0F0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E0F0u);
+  sub_0026E0F0_gpu_original();
+  if(BlackGpuRoute(0x0026E0F0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E0F0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E130_gpu_original(void);
+void sub_0026E130(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E130u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E130u);
+  sub_0026E130_gpu_original();
+  if(BlackGpuRoute(0x0026E130u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E130u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E1A0_gpu_original(void);
+void sub_0026E1A0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E1A0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E1A0u);
+  sub_0026E1A0_gpu_original();
+  if(BlackGpuRoute(0x0026E1A0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E1A0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E210_gpu_original(void);
+void sub_0026E210(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E210u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E210u);
+  sub_0026E210_gpu_original();
+  if(BlackGpuRoute(0x0026E210u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E210u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E230_gpu_original(void);
+void sub_0026E230(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E230u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E230u);
+  sub_0026E230_gpu_original();
+  if(BlackGpuRoute(0x0026E230u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E230u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E250_gpu_original(void);
+void sub_0026E250(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E250u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E250u);
+  sub_0026E250_gpu_original();
+  if(BlackGpuRoute(0x0026E250u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E250u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E270_gpu_original(void);
+void sub_0026E270(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E270u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E270u);
+  sub_0026E270_gpu_original();
+  if(BlackGpuRoute(0x0026E270u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E270u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E320_gpu_original(void);
+void sub_0026E320(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E320u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E320u);
+  sub_0026E320_gpu_original();
+  if(BlackGpuRoute(0x0026E320u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E320u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E350_gpu_original(void);
+void sub_0026E350(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E350u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E350u);
+  sub_0026E350_gpu_original();
+  if(BlackGpuRoute(0x0026E350u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E350u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E380_gpu_original(void);
+void sub_0026E380(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E380u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E380u);
+  sub_0026E380_gpu_original();
+  if(BlackGpuRoute(0x0026E380u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E380u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E3C0_gpu_original(void);
+void sub_0026E3C0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E3C0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E3C0u);
+  sub_0026E3C0_gpu_original();
+  if(BlackGpuRoute(0x0026E3C0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E3C0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E3E0_gpu_original(void);
+void sub_0026E3E0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E3E0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E3E0u);
+  sub_0026E3E0_gpu_original();
+  if(BlackGpuRoute(0x0026E3E0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E3E0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E400_gpu_original(void);
+void sub_0026E400(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E400u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E400u);
+  sub_0026E400_gpu_original();
+  if(BlackGpuRoute(0x0026E400u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E400u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E460_gpu_original(void);
+void sub_0026E460(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E460u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E460u);
+  sub_0026E460_gpu_original();
+  if(BlackGpuRoute(0x0026E460u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E460u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E4B0_gpu_original(void);
+void sub_0026E4B0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E4B0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E4B0u);
+  sub_0026E4B0_gpu_original();
+  if(BlackGpuRoute(0x0026E4B0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E4B0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E4D0_gpu_original(void);
+void sub_0026E4D0(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E4D0u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E4D0u);
+  sub_0026E4D0_gpu_original();
+  if(BlackGpuRoute(0x0026E4D0u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E4D0u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E530_gpu_original(void);
+void sub_0026E530(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E530u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E530u);
+  sub_0026E530_gpu_original();
+  if(BlackGpuRoute(0x0026E530u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E530u);
+  --black_gpu_call_depth;
+}
+extern void sub_0026E580_gpu_original(void);
+void sub_0026E580(void) {
+  BlackGpuCall before; capture(&before,1);
+  int depth=black_gpu_call_depth++;
+  if(BlackGpuRoute(0x0026E580u,0,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU host not attached",0x0026E580u);
+  sub_0026E580_gpu_original();
+  if(BlackGpuRoute(0x0026E580u,1,depth,&before,g_eax)<0)
+    recomp_unimpl("Native GPU post-call failed",0x0026E580u);
   --black_gpu_call_depth;
 }
 extern void sub_0026E5B0_gpu_original(void);

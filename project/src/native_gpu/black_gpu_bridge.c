@@ -23,7 +23,16 @@ void hle_port_native_missing(const char* boundary, unsigned caller) {
     fprintf(stderr,"Black native GPU boundary unavailable: %s (caller %08X)\n",boundary,caller);
     abort();
 }
-int hle_trace_on(void) { return 0; }
+/* Trace one frame at a configurable interval; disabled in normal play. */
+int hle_trace_on(void) {
+    static int every = -1;
+    if (every < 0) {
+        const char *e = getenv("BLACK_GPU_TRACE_EVERY");
+        every = e ? atoi(e) : 0;
+        if (every < 0) every = 0;
+    }
+    return every > 0 && g_hle.swaps % (unsigned)every == 0;
+}
 int hle_trace_black_wanted(void) { return 0; }
 void hle_trace_arm_next(void) {}
 
@@ -45,9 +54,24 @@ int BlackGpuAttachMemory(ptrdiff_t offset, BlackGpuKeyCallback callback) {
 const char* BlackGpuApiName(uint32_t va) { const Binding* b=find(va);return b?b->name:NULL; }
 int BlackGpuApiCount(void) { return sizeof(bindings)/sizeof(bindings[0]); }
 int BlackGpuReady(void) { return attached && g_hle.dev!=NULL; }
+/* BLACK_GPU_STATS=<swaps>: per-API call counts (game calls, depth 0) every N swaps. */
+static unsigned long long s_api_calls[256];
+static void api_stats(const Binding* b, int depth, int phase) {
+    static int every=-1; static unsigned long long swaps;
+    if(every<0){const char*e=getenv("BLACK_GPU_STATS");every=e?atoi(e):0;}
+    if(!every||phase!=0||depth) return;
+    s_api_calls[(unsigned)(b-bindings)&255]++;
+    if(b->id==HLE_D3DDevice_Swap && ++swaps%(unsigned)every==0){
+        fprintf(stderr,"[BLACK-GPU] swap %llu API calls:",swaps);
+        for(unsigned i=0;i<sizeof(bindings)/sizeof(bindings[0])&&i<256;++i)
+            if(s_api_calls[i]) fprintf(stderr," %s=%llu",bindings[i].name,s_api_calls[i]);
+        fputc('\n',stderr); memset(s_api_calls,0,sizeof s_api_calls);
+    }
+}
 int BlackGpuRoute(uint32_t va, int phase, int depth, const BlackGpuCall* call, uint32_t result) {
     const Binding* b=find(va); uint32_t args[6]={0};
     if(!b) return 0;
+    api_stats(b,depth,phase);
     if(!attached || !call || (phase!=0 && phase!=1) || depth<0) return -1;
     g_esp=call->gpr[4];
     for(unsigned i=0;i<b->count;++i) {
@@ -61,10 +85,31 @@ int BlackGpuRoute(uint32_t va, int phase, int depth, const BlackGpuCall* call, u
     if(phase==0 && b->id==HLE_D3DDevice_SetPixelShaderConstant)
         for(unsigned i=0;i<args[2] && args[0]+i<18;++i) hle_ps_constants_written|=1u<<(args[0]+i);
     if(phase==0 && depth==0) {
+        /* Draws the game pushed since the last call are drawn before anything this call changes. */
+        extern void hle_draw_pb_sync(void);
+        hle_draw_pb_sync();
         if(b->id==HLE_D3DDevice_Clear) {
             float z;memcpy(&z,&args[4],4);
             hle_native_clear(args[0],args[1],args[2],args[3],z,args[5]);
-        } else if(b->id==HLE_D3DDevice_Swap) hle_native_swap(args[0]);
+        } else if(b->id==HLE_D3DDevice_Swap) {
+            /* BLACK_MEMSNAP=<prefix> BLACK_MEMSNAP_AT=<swap>,<swap>,...: dump guest .data (diagnostic). */
+            static unsigned long long nswap; static const char *at; static int init;
+            if(!init){init=1;at=getenv("BLACK_MEMSNAP_AT");}
+            ++nswap;
+            if(at){
+                const char *p=at;
+                while(*p){
+                    unsigned long long v=strtoull(p,(char**)&p,10);
+                    if(v==nswap){
+                        char path[512];FILE *f;
+                        snprintf(path,sizeof path,"%s-%llu.bin",getenv("BLACK_MEMSNAP"),nswap);
+                        if((f=fopen(path,"wb"))){fwrite((const void*)XBOX_PTR(0x2964E0u),1,0x2E65B8u,f);fclose(f);}
+                    }
+                    if(*p==',')p++; else break;
+                }
+            }
+            hle_native_swap(args[0]);
+        }
         else if(b->id==HLE_D3DDevice_CopyRects)
             hle_native_copy_rects(args[0],args[1],args[2],args[3],args[4]);
     }

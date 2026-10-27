@@ -19,7 +19,7 @@ for source in gen.glob('*.c'):
         found.add(address)
         return f'void sub_{address:08X}_gpu_original(void) {{'
     output = re.sub(r'^void sub_([0-9A-F]{8})\(void\)\s*\{', rename, text, flags=re.MULTILINE)
-    found.update(int(a,16) for a in re.findall(r'^void sub_([0-9A-F]{8})_gpu_original\(void\)', text, re.MULTILINE))
+    found.update(int(a,16) for a in re.findall(r'^void sub_([0-9A-F]{8})_gpu_original(?:_gen)?\(void\)', text, re.MULTILINE))
     if output != text:source.write_text(output,encoding='utf-8')
 
 lines=['/* Generated wrappers; addresses/ABIs belong to Black XBE only. */',

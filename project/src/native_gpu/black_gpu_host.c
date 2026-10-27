@@ -1,30 +1,39 @@
 /* Optional host UI is outside the guest D3D API; no fake game API results. */
 #include "hle_options.h"
+#include "black_gpu.h"
 #include "hle_gpu_api.h"
 #include <stdio.h>
+#include <stdlib.h>
 /* Native CPU hosts use preemptive OS threads, with no global guest-CPU lock.
  * A future serialized host must replace this scheduling boundary explicitly. */
 int guest_cpu_suspend(void){return 0;}
 void guest_cpu_resume(int token){(void)token;}
 void hle_stall_tick(void){} /* diagnostic watchdog is not part of frame semantics */
-HleOptions g_opt={0,0,0,1,60,1,0,0,0,0,-1,1,100,1};
-int hle_options_key(UINT m,WPARAM k,LPARAM l){(void)m;(void)k;(void)l;return 0;}
-int hle_options_mouse(UINT m,int x,int y,int w,int cw,int ch){(void)m;(void)x;(void)y;(void)w;(void)cw;(void)ch;return 0;}
-int hle_options_hide_cursor(void){return 0;}
-void hle_options_frame(void){}
-void hle_options_standalone(void){}
-void hle_options_apply_display(uint32_t w,uint32_t h){(void)w;(void)h;}
-void hle_options_draw_overlay(ID3D11RenderTargetView* r,UINT w,UINT h){(void)r;(void)w;(void)h;}
-void hle_options_draw_button(ID3D11RenderTargetView* r){(void)r;}
-const char* hle_options_capture_tag(void){return NULL;}
-void hle_options_initial_window(DWORD* style,RECT* r){*style=WS_OVERLAPPEDWINDOW;*r=(RECT){0,0,1280,720};AdjustWindowRect(r,*style,FALSE);}
-float hle_options_native_scale(void){return 1.0f;}
-int hle_gpu_api(void){return HLE_API_D3D11;}
-const char* hle_gpu_api_name(void){return "D3D11";}
-void hle_gpu_api_load(void){}
-int hle_gpu_vulkan_available(void){return 0;}
-int hle_gpu_d3d11_available(void){return 1;}
-HRESULT hle_d3d_compile(LPCVOID src,SIZE_T len,LPCSTR name,const D3D_SHADER_MACRO* defs,
- ID3DInclude* inc,LPCSTR entry,LPCSTR target,UINT f1,UINT f2,ID3DBlob** code,ID3DBlob** errors){
- return D3DCompile(src,len,name,defs,inc,entry,target,f1,f2,code,errors);
+/* hle_gpu_api.c: D3D11 or Vulkan (DXVK in vulkan\ next to the executable). */
+
+static BlackGpuVolumeCallback s_volume_callback;
+void black_options_volume(float volume) { if (s_volume_callback) s_volume_callback(volume); }
+void BlackGpuInitOptions(BlackGpuVolumeCallback callback) {
+    s_volume_callback = callback;
+    SetProcessDPIAware();
+    hle_options_init();
+    hle_gpu_api_load();             /* before any D3D11/DXGI call: binds DXVK when Vulkan is chosen */
+}
+
+/* Opt-in timing evidence: the AOT timer at 0x82210 accumulates milliseconds
+ * from the scaled RDTSC; 0x2BFF9C counts its update cycles. Read only. */
+void black_options_timing(void) {
+    static int enabled = -1;
+    static ULONGLONG start, last;
+    if (enabled < 0) enabled = getenv("BLACK_TIMING_TRACE") != NULL;
+    if (!enabled) return;
+    ULONGLONG now = GetTickCount64();
+    if (!start) start = now;
+    if (now - last < 1000) return;
+    last = now;
+    extern ptrdiff_t g_xbox_mem_offset;
+    uint32_t ms = *(volatile uint32_t *)(g_xbox_mem_offset + 0x2C02A0);
+    uint32_t cycles = *(volatile uint32_t *)(g_xbox_mem_offset + 0x2BFF9C);
+    fprintf(stderr, "[BLACK-TIMING] wall_ms=%llu swaps=%llu timer_ms=%u cycles=%u vsync=%d fps=%d\n",
+        now-start, (unsigned long long)g_hle.swaps, ms, cycles, g_opt.vsync, g_opt.fps);
 }

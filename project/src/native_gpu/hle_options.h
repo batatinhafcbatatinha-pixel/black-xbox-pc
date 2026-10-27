@@ -1,5 +1,5 @@
 // Adapted generic renderer; Black bindings verified in analysis/native-gpu-bindings.json.
-/* In-game options (F1 / Back+Start): settings kept in fifastreet.ini next to
+/* In-game options (F1 / Back+Start): settings kept in black-pc.ini next to
  * the executable. See hle_options.c. */
 #ifndef HLE_OPTIONS_H
 #define HLE_OPTIONS_H
@@ -26,7 +26,7 @@ typedef struct HleOptions {
 
 extern HleOptions g_opt;
 
-/* WinMain, before anything reads the environment: fifastreet.ini supplies
+/* WinMain, before anything reads the environment: black-pc.ini supplies
  * RECOMP_HLE_SCALE/ASPECT/FPS/ADAPTER and RECOMP_LANGUAGE unless already set. */
 void hle_options_init(void);
 /* Window thread, for every key message. Returns 1 when the menu took it. */
