@@ -72,6 +72,7 @@ static const struct { int h, aspect; const wchar_t *name; } k_res[] = {
 #define N_RES ((int)(sizeof k_res / sizeof k_res[0]))
 static const int k_fps[] = { 60, 30, 0 };
 static const int k_aniso[] = { 0, 2, 4, 8, 16 };
+static const int k_msaa[] = { 0, -1, 2, 4, 8 };
 
 /* ------------------------------------------------------------- ini file */
 
@@ -110,6 +111,7 @@ static void save_ini(void)
     ini_put(L"resolucao", g_opt.scale);
     ini_put(L"proporcao", g_opt.aspect);
     ini_put(L"fxaa", g_opt.aa);
+    ini_put(L"msaa", g_opt.msaa);
     ini_put(L"anisotropico", g_opt.aniso);
     ini_put(L"api_grafica", g_opt.api);
     ini_put(L"gpu", g_opt.adapter);
@@ -174,6 +176,8 @@ static void env_publish(void)
     _putenv_s("RECOMP_HLE_API", g_opt.api ? "vulkan" : "d3d11");
     snprintf(b, sizeof b, "%d", g_opt.fps);
     _putenv_s("RECOMP_HLE_FPS", b);
+    snprintf(b, sizeof b, "%d", g_opt.msaa);
+    _putenv_s("RECOMP_HLE_MSAA", b);
 }
 
 static void native_monitor_defaults(void);
@@ -195,6 +199,7 @@ void hle_options_init(void)
     g_opt.scale = clampi(ini_get(L"resolucao", 0), 0, N_RES - 1);
     g_opt.aspect = clampi(ini_get(L"proporcao", 0), 0, N_ASPECT - 1);
     g_opt.aa = clampi(ini_get(L"fxaa", 0), 0, 1);
+    g_opt.msaa = ini_get(L"msaa", 0);
     g_opt.aniso = clampi(ini_get(L"anisotropico", 16), 0, 16);
     g_opt.api = clampi(ini_get(L"api_grafica", 0), 0, 1);
     g_opt.adapter = clampi(ini_get(L"gpu", -1), -1, 15);
@@ -219,6 +224,9 @@ void hle_options_init(void)
     env_sync("RECOMP_LANGUAGE", &g_opt.language, 1, 9, -99);
     env_sync("RECOMP_HLE_ADAPTER", &g_opt.adapter, -1, 15, -1);
     env_sync("RECOMP_HLE_FPS", &g_opt.fps, 0, 1000, -99);
+    env_sync("RECOMP_HLE_MSAA", &g_opt.msaa, -1, 8, -99);
+    if (g_opt.msaa != -1 && g_opt.msaa != 2 && g_opt.msaa != 4 && g_opt.msaa != 8)
+        g_opt.msaa = 0;
     e = getenv("RECOMP_HLE_VSYNC");                  /* test runs; not published */
     if (e && *e)
         g_opt.vsync = atoi(e) != 0;
@@ -531,7 +539,7 @@ void hle_options_apply_display(uint32_t pw, uint32_t ph)
 /* ------------------------------------------------------------ the menu */
 
 enum {
-    IT_DISPLAY, IT_MONITOR, IT_REFRESH, IT_VSYNC, IT_FPS, IT_SCALE, IT_ASPECT, IT_AA, IT_ANISO,
+    IT_DISPLAY, IT_MONITOR, IT_REFRESH, IT_VSYNC, IT_FPS, IT_SCALE, IT_ASPECT, IT_AA, IT_MSAA, IT_ANISO,
     IT_API, IT_GPU, IT_UI_LANG, IT_LANG, IT_VOLUME, IT_RESUME, IT_RESTART, IT_QUIT, IT_COUNT
 };
 
@@ -546,7 +554,7 @@ static int restart_pending(void)
 {
     return g_opt.scale != s_boot.scale || g_opt.aspect != s_boot.aspect ||
            g_opt.adapter != s_boot.adapter || g_opt.language != s_boot.language ||
-           g_opt.api != s_boot.api;
+           g_opt.api != s_boot.api || g_opt.msaa != s_boot.msaa;
 }
 
 static int item_restart(int it)
@@ -557,6 +565,7 @@ static int item_restart(int it)
     case IT_API: return g_opt.api != s_boot.api;
     case IT_GPU: return g_opt.adapter != s_boot.adapter;
     case IT_LANG: return g_opt.language != s_boot.language;
+    case IT_MSAA: return g_opt.msaa != s_boot.msaa;
     }
     return 0;
 }
@@ -689,6 +698,11 @@ static void change(int it, int d)
         break;
     case IT_ASPECT: g_opt.aspect = (g_opt.aspect + N_ASPECT + d) % N_ASPECT; break;
     case IT_AA: g_opt.aa = !g_opt.aa; break;
+    case IT_MSAA:
+        g_opt.msaa = cycle(k_msaa, 5, g_opt.msaa, d);
+        if (g_opt.msaa < 0 && g_hle.game_msaa <= 1)   /* the game asks for none: no "game default" */
+            g_opt.msaa = cycle(k_msaa, 5, g_opt.msaa, d);
+        break;
     case IT_ANISO: g_opt.aniso = cycle(k_aniso, 5, g_opt.aniso, d); break;
     case IT_API:
         if (!hle_gpu_vulkan_available() || !hle_gpu_d3d11_available())
@@ -1000,8 +1014,8 @@ static void menu_loop(void)
     if (s_autotest == 0)
         s_autotest = 0x7FFFFFFF;
     guest_cpu_resume(token);
-    fprintf(stderr, "[OPTIONS] menu closed: display %d, vsync %d, fps %d, fxaa %d, aniso %d, volume %d%s\n",
-            g_opt.display, g_opt.vsync, g_opt.fps, g_opt.aa, g_opt.aniso, g_opt.volume,
+    fprintf(stderr, "[OPTIONS] menu closed: display %d, vsync %d, fps %d, fxaa %d, msaa %d, aniso %d, volume %d%s\n",
+            g_opt.display, g_opt.vsync, g_opt.fps, g_opt.aa, g_opt.msaa, g_opt.aniso, g_opt.volume,
             restart_pending() ? " (restart pending)" : "");
 }
 
@@ -1354,6 +1368,17 @@ static void item_text(int it, wchar_t *label, wchar_t *value, int *greyed)
         wcscpy(label, ui_text(L"Antisserrilhamento", L"Anti-aliasing"));
         wcscpy(value, g_opt.aa ? L"FXAA" : ui_text(L"Desligado", L"Off"));
         break;
+    case IT_MSAA:
+        wcscpy(label, ui_text(L"Multiamostragem (MSAA)", L"Multisampling (MSAA)"));
+        if (g_opt.msaa > 0)
+            swprintf(value, 128, L"%dx", g_opt.msaa);
+        else if (g_opt.msaa < 0 && g_hle.game_msaa > 1)
+            swprintf(value, 128, ui_text(L"O do jogo (%ux)", L"Game default (%ux)"), g_hle.game_msaa);
+        else if (g_opt.msaa < 0)
+            wcscpy(value, ui_text(L"O do jogo (nenhum)", L"Game default (none)"));
+        else
+            wcscpy(value, ui_text(L"Desligada", L"Off"));
+        break;
     case IT_ANISO:
         wcscpy(label, ui_text(L"Filtro anisotrópico", L"Anisotropic filtering"));
         if (g_opt.aniso) swprintf(value, 128, L"%dx", g_opt.aniso);
@@ -1401,6 +1426,7 @@ static const wchar_t *item_help(int it)
     case IT_SCALE: return ui_text(L"Resolução em que o jogo é desenhado: maior = imagem mais nítida, mais trabalho para a placa. Também ajusta a proporção.", L"Higher rendering resolutions give a sharper image and increase GPU load. Also adjusts aspect ratio.");
     case IT_ASPECT: return ui_text(L"4:3 é o original. As outras alargam o campo de visão para telas largas.", L"4:3 is the original. Other ratios widen the field of view for widescreen displays.");
     case IT_AA: return ui_text(L"FXAA suaviza as bordas serrilhadas com custo quase nulo.", L"FXAA smooths jagged edges with minimal performance cost.");
+    case IT_MSAA: return ui_text(L"Suaviza as bordas da cena 3D com várias amostras por pixel. \"O do jogo\" usa o que o Xbox usava. Reinicia o jogo.", L"Smooths the edges of the 3D scene with several samples per pixel. \"Game default\" uses what the Xbox used. Restarts the game.");
     case IT_ANISO: return ui_text(L"Deixa nítidas as texturas vistas em ângulo, como o chão.", L"Sharpens textures viewed at an angle, such as the ground.");
     case IT_API: return !hle_gpu_d3d11_available() ? ui_text(L"Neste sistema o jogo desenha com Vulkan (DXVK).", L"This system renders the game with Vulkan (DXVK).")
                       : hle_gpu_vulkan_available()

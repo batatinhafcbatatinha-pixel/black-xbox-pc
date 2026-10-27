@@ -2029,7 +2029,7 @@ static void draw(uint32_t prim, const uint32_t *verts, uint32_t n, const CustomS
         d.skipped++;
         return;
     }
-    if (ds && (!ds->dsv || ds->w != rt->w || ds->h != rt->h))
+    if (ds && (!ds->dsv || ds->w != rt->w || ds->h != rt->h || ds->samples != rt->samples))
         ds = NULL;
     if (s_rtlog) {
         if (s_rtlog < 0) {
@@ -2364,7 +2364,7 @@ static void draw(uint32_t prim, const uint32_t *verts, uint32_t n, const CustomS
         UINT e = (UINT)(hle_map_x(rt, (float)rt->w) + 0.5f);
         ID3D11Texture2D_GetDesc(rt->tex, &td);
         td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ; td.MiscFlags = 0;
-        if (e > 12 && e + 12 < rt->tw && SUCCEEDED(ID3D11Device_CreateTexture2D(g_hle.dev, &td, NULL, &st))) {
+        if (rt->samples == 1 && e > 12 && e + 12 < rt->tw && SUCCEEDED(ID3D11Device_CreateTexture2D(g_hle.dev, &td, NULL, &st))) {
             ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)st, (ID3D11Resource *)rt->tex);
             if (SUCCEEDED(ID3D11DeviceContext_Map(g_hle.ctx, (ID3D11Resource *)st, 0, D3D11_MAP_READ, 0, &sm))) {
                 double in = 0, out = 0;
