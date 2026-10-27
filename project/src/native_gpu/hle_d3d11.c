@@ -46,6 +46,7 @@
 #define XCLEAR_TARGET       0xF0u
 
 HleBackend g_hle;
+static void msaa_choose(void);
 static int s_present_trace = -1;
 
 static int hle_present_trace_enabled(void)
@@ -487,6 +488,9 @@ static void surface_release(HleSurface *h)
     if (h->rtv) ID3D11RenderTargetView_Release(h->rtv);
     if (h->dsv) ID3D11DepthStencilView_Release(h->dsv);
     if (h->srv) ID3D11ShaderResourceView_Release(h->srv);
+    if (h->single_rtv) ID3D11RenderTargetView_Release(h->single_rtv);
+    if (h->single_srv) ID3D11ShaderResourceView_Release(h->single_srv);
+    if (h->single) ID3D11Texture2D_Release(h->single);
     if (h->tex) ID3D11Texture2D_Release(h->tex);
     memset(h, 0, sizeof *h);
 }
@@ -551,7 +555,11 @@ HleSurface *hle_surface_for(uint32_t va)
     }
     td.MipLevels = 1;
     td.ArraySize = 1;
-    td.SampleDesc.Count = 1;
+    /* MSAA (options): the back buffer, its depth buffer and same-size
+     * targets -- the ones drawn and depth-tested together. */
+    if (!g_hle.msaa)
+        msaa_choose();
+    td.SampleDesc.Count = g_hle.msaa > 1 && w == g_hle.pp_w && h == g_hle.pp_h ? g_hle.msaa : 1;
     td.Usage = D3D11_USAGE_DEFAULT;
     slot->depth = xfmt_is_depth(xfmt);
     if (slot->depth) {
@@ -569,7 +577,7 @@ HleSurface *hle_surface_for(uint32_t va)
             D3D11_DEPTH_STENCIL_VIEW_DESC dd;
             memset(&dd, 0, sizeof dd);
             dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-            dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+            dd.ViewDimension = td.SampleDesc.Count > 1 ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
             hr = ID3D11Device_CreateDepthStencilView(g_hle.dev, (ID3D11Resource *)slot->tex, &dd, &slot->dsv);
         }
         else
@@ -588,6 +596,7 @@ HleSurface *hle_surface_for(uint32_t va)
     slot->h = h;
     slot->tw = td.Width;
     slot->th = td.Height;
+    slot->samples = td.SampleDesc.Count;
     slot->xk = (float)td.Width / ((float)w * g_hle.scale);
     slot->last_use = g_hle.swaps + 1;
     if (g_hle.log)
@@ -604,6 +613,8 @@ ID3D11ShaderResourceView *hle_surface_srv(uint32_t data)
     for (i = 0; i < MAX_SURFACES; i++) {
         HleSurface *c = &g_hle.surf[i];
         if (c->tex && !c->depth && c->data == data) {
+            if (c->samples > 1)
+                return hle_surface_resolved(c) ? c->single_srv : NULL;
             if (!c->srv)
                 ID3D11Device_CreateShaderResourceView(g_hle.dev, (ID3D11Resource *)c->tex, NULL, &c->srv);
             return c->srv;
@@ -614,6 +625,11 @@ ID3D11ShaderResourceView *hle_surface_srv(uint32_t data)
     for (i = 0; i < MAX_SURFACES; i++) {
         HleSurface *c = &g_hle.surf[i];
         if (c->tex && c->depth && c->data == data) {
+            if (c->samples > 1) {
+                if (!c->srv)
+                    fprintf(stderr, "[HLE-D3D11] depth buffer %08X sampled as a texture (MSAA: sample 0)\n", data);
+                return hle_surface_resolved(c) ? c->single_srv : NULL;
+            }
             if (!c->srv) {
                 D3D11_SHADER_RESOURCE_VIEW_DESC sd;
                 memset(&sd, 0, sizeof sd);
@@ -638,6 +654,200 @@ int hle_surface_is_depth(uint32_t data)
     return 0;
 }
 
+/* ------------------------------------------------------------------ MSAA */
+
+/* Samples for the back-buffer-sized surfaces: the options' choice (-1 = what
+ * the game asked for at CreateDevice), lowered to what the card renders in
+ * both surface formats. */
+static void msaa_choose(void)
+{
+    UINT want = g_opt.msaa < 0 ? g_hle.game_msaa : (UINT)g_opt.msaa, q;
+    if (want > 8)
+        want = 8;
+    while (want & (want - 1))
+        want &= want - 1;   /* a power of two: 9 samples -> 8 */
+    for (; want > 1; want /= 2) {
+        if (SUCCEEDED(ID3D11Device_CheckMultisampleQualityLevels(g_hle.dev, DXGI_FORMAT_B8G8R8A8_UNORM, want, &q)) && q &&
+            SUCCEEDED(ID3D11Device_CheckMultisampleQualityLevels(g_hle.dev, DXGI_FORMAT_D24_UNORM_S8_UINT, want, &q)) && q)
+            break;
+    }
+    g_hle.msaa = want > 1 ? want : 1;
+    fprintf(stderr, "[HLE-D3D11] MSAA: %ux (option %d, the game asked for %ux)\n", g_hle.msaa, g_opt.msaa,
+            g_hle.game_msaa);
+}
+
+/* Fullscreen-triangle copies for MSAA surfaces: ps_copy writes a texel of a
+ * single-sample source (offset by c.xy) into a multisampled target, ps_depth
+ * sample 0 of a multisampled depth buffer into an R32_FLOAT texture. */
+static ID3D11VertexShader *s_ms_vs;
+static ID3D11PixelShader *s_ms_copy_ps, *s_ms_depth_ps;
+static ID3D11Buffer *s_ms_cb;
+static ID3D11RasterizerState *s_ms_rs;
+static ID3D11DepthStencilState *s_ms_dss;
+
+static int msaa_shaders(void)
+{
+    static const char source[] =
+        "cbuffer C:register(b0){int4 c;};"
+        "Texture2D<float4> t:register(t0); Texture2DMS<float4> m:register(t0);"
+        "float4 vs(uint id:SV_VertexID):SV_Position{float2 q=float2((id<<1)&2,id&2);"
+        "return float4(q*float2(2,-2)+float2(-1,1),0,1);}"
+        "float4 ps_copy(float4 p:SV_Position):SV_Target{return t.Load(int3(int2(p.xy)+c.xy,0));}"
+        "float ps_depth(float4 p:SV_Position):SV_Target{return m.Load(int2(p.xy),0).r;}";
+    static int failed;
+    const char *entry[3] = { "vs", "ps_copy", "ps_depth" }, *profile[3] = { "vs_5_0", "ps_5_0", "ps_5_0" };
+    ID3DBlob *code[3] = { NULL, NULL, NULL };
+    D3D11_BUFFER_DESC bd;
+    D3D11_RASTERIZER_DESC rd;
+    D3D11_DEPTH_STENCIL_DESC dd;
+    int i, ok = 1;
+
+    if (s_ms_vs)
+        return 1;
+    if (failed)
+        return 0;
+    for (i = 0; i < 3 && ok; i++) {
+        ID3DBlob *error = NULL;
+        if (FAILED(hle_d3d_compile(source, sizeof source - 1, "hle_msaa", NULL, NULL, entry[i], profile[i],
+                                   0, 0, &code[i], &error)))
+            ok = 0;
+        if (error) {
+            if (!ok)
+                fprintf(stderr, "[HLE-D3D11] MSAA %s: %s\n", entry[i], (const char *)ID3D10Blob_GetBufferPointer(error));
+            ID3D10Blob_Release(error);
+        }
+    }
+    if (ok)
+        ok = SUCCEEDED(ID3D11Device_CreateVertexShader(g_hle.dev, ID3D10Blob_GetBufferPointer(code[0]),
+                                                       ID3D10Blob_GetBufferSize(code[0]), NULL, &s_ms_vs)) &&
+             SUCCEEDED(ID3D11Device_CreatePixelShader(g_hle.dev, ID3D10Blob_GetBufferPointer(code[1]),
+                                                      ID3D10Blob_GetBufferSize(code[1]), NULL, &s_ms_copy_ps)) &&
+             SUCCEEDED(ID3D11Device_CreatePixelShader(g_hle.dev, ID3D10Blob_GetBufferPointer(code[2]),
+                                                      ID3D10Blob_GetBufferSize(code[2]), NULL, &s_ms_depth_ps));
+    for (i = 0; i < 3; i++)
+        if (code[i]) ID3D10Blob_Release(code[i]);
+    memset(&bd, 0, sizeof bd);
+    bd.ByteWidth = 16;
+    bd.Usage = D3D11_USAGE_DYNAMIC;
+    bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    memset(&rd, 0, sizeof rd);
+    rd.FillMode = D3D11_FILL_SOLID;
+    rd.CullMode = D3D11_CULL_NONE;
+    rd.ScissorEnable = TRUE;
+    memset(&dd, 0, sizeof dd);
+    dd.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    if (ok)
+        ok = SUCCEEDED(ID3D11Device_CreateBuffer(g_hle.dev, &bd, NULL, &s_ms_cb)) &&
+             SUCCEEDED(ID3D11Device_CreateRasterizerState(g_hle.dev, &rd, &s_ms_rs)) &&
+             SUCCEEDED(ID3D11Device_CreateDepthStencilState(g_hle.dev, &dd, &s_ms_dss));
+    if (!ok) {
+        failed = 1;
+        fprintf(stderr, "[HLE-D3D11] MSAA copy shaders unavailable\n");
+    }
+    return ok;
+}
+
+/* Draws `src` into `rtv` over the rectangle r, reading texel (x + ox, y + oy)
+ * of the source for target pixel (x, y). */
+static void msaa_draw(ID3D11RenderTargetView *rtv, ID3D11ShaderResourceView *src, ID3D11PixelShader *ps,
+                      const D3D11_RECT *r, int ox, int oy)
+{
+    D3D11_MAPPED_SUBRESOURCE m;
+    D3D11_VIEWPORT vp;
+    ID3D11ShaderResourceView *none = NULL;
+
+    hle_draw_state_invalidate();
+    if (SUCCEEDED(ID3D11DeviceContext_Map(g_hle.ctx, (ID3D11Resource *)s_ms_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
+        int c[4] = { ox, oy, 0, 0 };
+        memcpy(m.pData, c, sizeof c);
+        ID3D11DeviceContext_Unmap(g_hle.ctx, (ID3D11Resource *)s_ms_cb, 0);
+    }
+    vp.TopLeftX = 0; vp.TopLeftY = 0;
+    vp.Width = (float)r->right; vp.Height = (float)r->bottom;
+    vp.MinDepth = 0; vp.MaxDepth = 1;
+    ID3D11DeviceContext_OMSetRenderTargets(g_hle.ctx, 1, &rtv, NULL);
+    ID3D11DeviceContext_RSSetViewports(g_hle.ctx, 1, &vp);
+    ID3D11DeviceContext_RSSetScissorRects(g_hle.ctx, 1, r);
+    ID3D11DeviceContext_RSSetState(g_hle.ctx, s_ms_rs);
+    ID3D11DeviceContext_OMSetBlendState(g_hle.ctx, NULL, NULL, 0xFFFFFFFFu);
+    ID3D11DeviceContext_OMSetDepthStencilState(g_hle.ctx, s_ms_dss, 0);
+    ID3D11DeviceContext_IASetInputLayout(g_hle.ctx, NULL);
+    ID3D11DeviceContext_IASetPrimitiveTopology(g_hle.ctx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11DeviceContext_VSSetShader(g_hle.ctx, s_ms_vs, NULL, 0);
+    ID3D11DeviceContext_GSSetShader(g_hle.ctx, NULL, NULL, 0);
+    ID3D11DeviceContext_PSSetShader(g_hle.ctx, ps, NULL, 0);
+    ID3D11DeviceContext_PSSetConstantBuffers(g_hle.ctx, 0, 1, &s_ms_cb);
+    ID3D11DeviceContext_PSSetShaderResources(g_hle.ctx, 0, 1, &src);
+    ID3D11DeviceContext_Draw(g_hle.ctx, 3, 0);
+    ID3D11DeviceContext_PSSetShaderResources(g_hle.ctx, 0, 1, &none);
+    ID3D11DeviceContext_OMSetRenderTargets(g_hle.ctx, 0, NULL, NULL);
+}
+
+ID3D11Texture2D *hle_surface_resolved(HleSurface *s)
+{
+    D3D11_TEXTURE2D_DESC td;
+
+    if (!s || !s->tex)
+        return NULL;
+    if (s->samples <= 1)
+        return s->tex;
+    if (!s->single) {
+        ID3D11Texture2D_GetDesc(s->tex, &td);
+        td.SampleDesc.Count = 1;
+        td.SampleDesc.Quality = 0;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (s->depth) {
+            td.Format = DXGI_FORMAT_R32_FLOAT;
+            td.BindFlags |= D3D11_BIND_RENDER_TARGET;
+        }
+        if (FAILED(ID3D11Device_CreateTexture2D(g_hle.dev, &td, NULL, &s->single)) ||
+            FAILED(ID3D11Device_CreateShaderResourceView(g_hle.dev, (ID3D11Resource *)s->single, NULL, &s->single_srv)) ||
+            (s->depth && FAILED(ID3D11Device_CreateRenderTargetView(g_hle.dev, (ID3D11Resource *)s->single, NULL,
+                                                                    &s->single_rtv)))) {
+            fprintf(stderr, "[HLE-D3D11] MSAA: no single-sample copy for surface %08X\n", s->data);
+            return NULL;
+        }
+    }
+    if (!s->depth) {
+        ID3D11DeviceContext_ResolveSubresource(g_hle.ctx, (ID3D11Resource *)s->single, 0, (ID3D11Resource *)s->tex, 0,
+                                               DXGI_FORMAT_B8G8R8A8_UNORM);
+    } else {
+        D3D11_RECT r = { 0, 0, (LONG)s->tw, (LONG)s->th };
+        if (!msaa_shaders())
+            return NULL;
+        if (!s->srv) {   /* the depth buffer's own (multisampled) view */
+            D3D11_SHADER_RESOURCE_VIEW_DESC sd;
+            memset(&sd, 0, sizeof sd);
+            sd.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+            sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+            if (FAILED(ID3D11Device_CreateShaderResourceView(g_hle.dev, (ID3D11Resource *)s->tex, &sd, &s->srv)))
+                return NULL;
+        }
+        msaa_draw(s->single_rtv, s->srv, s_ms_depth_ps, &r, 0, 0);
+    }
+    return s->single;
+}
+
+/* CopyRects with a multisampled source or destination (D3D11 copies only
+ * whole subresources between equal sample counts): from the source's
+ * single-sample copy; into a multisampled destination with a draw. */
+static void msaa_copy(HleSurface *dst, HleSurface *src, const D3D11_BOX *box, UINT ox, UINT oy)
+{
+    ID3D11Texture2D *from;
+    if (src->depth || dst->depth || !(from = hle_surface_resolved(src)))
+        return;
+    if (dst->samples <= 1) {
+        ID3D11DeviceContext_CopySubresourceRegion(g_hle.ctx, (ID3D11Resource *)dst->tex, 0, ox, oy, 0,
+                                                  (ID3D11Resource *)from, 0, box);
+    } else if (msaa_shaders()) {
+        D3D11_RECT r = { (LONG)ox, (LONG)oy, (LONG)(ox + box->right - box->left), (LONG)(oy + box->bottom - box->top) };
+        ID3D11ShaderResourceView *view = src->samples > 1 ? src->single_srv : hle_surface_srv(src->data);
+        if (view)
+            msaa_draw(dst->rtv, view, s_ms_copy_ps, &r, (int)box->left - (int)ox, (int)box->top - (int)oy);
+    }
+}
+
 /* The front buffer. On the Xbox every Swap leaves the finished frame there
  * (the library filters the back buffer into it), and the replay's effect
  * samples it through a texture header over that memory (game 0x1936B0). The
@@ -652,7 +862,7 @@ static void front_update(HleSurface *rt)
     if (!fo || !rt || MEM32(fo + 4) == rt->data)
         return;
     fr = hle_surface_for(fo);
-    if (fr && fr != rt && !fr->depth && fr->tw == rt->tw && fr->th == rt->th)
+    if (fr && fr != rt && !fr->depth && fr->tw == rt->tw && fr->th == rt->th && fr->samples == rt->samples)
         ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)fr->tex, (ID3D11Resource *)rt->tex);
 }
 
@@ -689,6 +899,14 @@ void hle_native_device_created(uint32_t pp_va)
     if (pp_va) {
         g_hle.pp_w = MEM32(pp_va + 0);
         g_hle.pp_h = MEM32(pp_va + 4);
+        /* D3DMULTISAMPLE_TYPE: x scale in bits 4-7, y scale in bits 0-3
+         * (0x0011 none, 0x1121 2 samples quincunx, 0x1022 4 samples ...). */
+        {
+            uint32_t ms = MEM32(pp_va + 16);
+            g_hle.game_msaa = ((ms >> 4) & 15u) * (ms & 15u);
+            if (!g_hle.game_msaa)
+                g_hle.game_msaa = 1;
+        }
         fprintf(stderr, "[HLE-D3D11] CreateDevice: back buffer %ux%u fmt %08X count %u ms %08X "
                         "swap %u autodepth %u/%08X flags %08X interval %08X\n",
                 g_hle.pp_w, g_hle.pp_h, MEM32(pp_va + 8), MEM32(pp_va + 12), MEM32(pp_va + 16),
@@ -857,13 +1075,16 @@ static void dump_surface_tag(HleSurface *h, const char *tag)
     D3D11_MAPPED_SUBRESOURCE m;
     char path[600];
 
-    ID3D11Texture2D_GetDesc(h->tex, &td);
+    ID3D11Texture2D *tex = hle_surface_resolved(h);
+    if (!tex)
+        return;
+    ID3D11Texture2D_GetDesc(tex, &td);
     td.Usage = D3D11_USAGE_STAGING;
     td.BindFlags = 0;
     td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     if (FAILED(ID3D11Device_CreateTexture2D(g_hle.dev, &td, NULL, &staging)))
         return;
-    ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)staging, (ID3D11Resource *)h->tex);
+    ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)staging, (ID3D11Resource *)tex);
     if (SUCCEEDED(ID3D11DeviceContext_Map(g_hle.ctx, (ID3D11Resource *)staging, 0, D3D11_MAP_READ, 0, &m))) {
         if (tag)
             snprintf(path, sizeof path, "%s-hle%06llu-%s.bmp", g_hle.dump_prefix, (unsigned long long)g_hle.swaps, tag);
@@ -1030,6 +1251,8 @@ static void black_probe(HleSurface *rt)
         return;
     }
     last_draws = draws;
+    if (rt->samples > 1)
+        return;   /* diagnostics: single-sample targets only */
     ID3D11Texture2D_GetDesc(rt->tex, &td);
     td.Usage = D3D11_USAGE_STAGING;
     td.BindFlags = 0;
@@ -1458,7 +1681,7 @@ void hle_native_copy_rects(uint32_t src_obj, uint32_t rects, uint32_t count,
         if (x0 >= x1 || y0 >= y1)
             continue;
         if (x0 == 0 && y0 == 0 && x1 == src->w && y1 == src->h && dx == 0 && dy == 0 &&
-            src->tw == dst->tw && src->th == dst->th) {
+            src->tw == dst->tw && src->th == dst->th && src->samples == dst->samples) {
             ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)dst->tex, (ID3D11Resource *)src->tex);
             continue;
         }
@@ -1481,9 +1704,13 @@ void hle_native_copy_rects(uint32_t src_obj, uint32_t rects, uint32_t count,
             continue;
         if (ox + (box.right - box.left) > dst->tw) box.right = box.left + (dst->tw - ox);
         if (oy + (box.bottom - box.top) > dst->th) box.bottom = box.top + (dst->th - oy);
-        if (box.right > box.left && box.bottom > box.top)
-            ID3D11DeviceContext_CopySubresourceRegion(g_hle.ctx, (ID3D11Resource *)dst->tex, 0, ox, oy, 0,
-                                                      (ID3D11Resource *)src->tex, 0, &box);
+        if (box.right > box.left && box.bottom > box.top) {
+            if (src->samples > 1 || dst->samples > 1)
+                msaa_copy(dst, src, &box, ox, oy);
+            else
+                ID3D11DeviceContext_CopySubresourceRegion(g_hle.ctx, (ID3D11Resource *)dst->tex, 0, ox, oy, 0,
+                                                          (ID3D11Resource *)src->tex, 0, &box);
+        }
     }
     if (g_hle.log || g_hle.copies <= 4)
         fprintf(stderr, "[HLE-D3D11] CopyRects %08X (%ux%u) -> %08X (%ux%u), %u rect(s)\n",
@@ -1522,13 +1749,18 @@ void hle_native_lock_rect(uint32_t obj, uint32_t locked)
         return;
     }
     hle_draw_flush();
-    ID3D11Texture2D_GetDesc(s->tex, &td);
+    ID3D11Texture2D *tex = hle_surface_resolved(s);
+    if (!tex) {
+        LeaveCriticalSection(&g_hle.lock);
+        return;
+    }
+    ID3D11Texture2D_GetDesc(tex, &td);
     td.Usage = D3D11_USAGE_STAGING;
     td.BindFlags = 0;
     td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     td.MiscFlags = 0;
     if (SUCCEEDED(ID3D11Device_CreateTexture2D(g_hle.dev, &td, NULL, &staging))) {
-        ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)staging, (ID3D11Resource *)s->tex);
+        ID3D11DeviceContext_CopyResource(g_hle.ctx, (ID3D11Resource *)staging, (ID3D11Resource *)tex);
         if (SUCCEEDED(ID3D11DeviceContext_Map(g_hle.ctx, (ID3D11Resource *)staging, 0, D3D11_MAP_READ, 0, &m))) {
             for (y = 0; y < h; y++) {
                 uint32_t sy = (uint32_t)(((float)((uint64_t)y * s->h / h) + 0.5f) * g_hle.scale);

@@ -30,6 +30,12 @@ typedef struct HleSurface {
     ID3D11RenderTargetView *rtv;
     ID3D11DepthStencilView *dsv;
     ID3D11ShaderResourceView *srv;        /* colour surfaces, lazily */
+    UINT samples;                         /* MSAA: > 1 on back-buffer-sized surfaces */
+    /* MSAA: the single-sample copy everything that reads the surface uses
+     * (hle_surface_resolved): colour averaged, depth sample 0 as R32_FLOAT. */
+    ID3D11Texture2D *single;
+    ID3D11ShaderResourceView *single_srv;
+    ID3D11RenderTargetView *single_rtv;
     uint64_t last_use;
 } HleSurface;
 
@@ -45,6 +51,8 @@ typedef struct HleBackend {
     int anamorphic;                       /* the game draws 16:9 itself (Xbox set to widescreen):
                                              widened surfaces are a plain horizontal stretch */
     uint32_t pp_w, pp_h;
+    UINT game_msaa;                       /* samples the game asked for at CreateDevice (1 = none) */
+    UINT msaa;                            /* samples of back-buffer-sized surfaces (options, 1 = off) */
     CRITICAL_SECTION lock;
 
     HWND hwnd;
@@ -73,6 +81,9 @@ extern HleBackend g_hle;
 uint32_t hle_device_va(void);
 HleSurface *hle_surface_for(uint32_t va);
 ID3D11ShaderResourceView *hle_surface_srv(uint32_t data);
+/* The surface as a single-sample texture (MSAA surfaces are resolved first):
+ * for copies and CPU reads. */
+ID3D11Texture2D *hle_surface_resolved(HleSurface *s);
 int hle_surface_is_depth(uint32_t data);
 /* A texture over the front buffer's memory: the last presented frame. */
 ID3D11ShaderResourceView *hle_front_srv(uint32_t data);
