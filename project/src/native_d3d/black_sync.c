@@ -12,6 +12,76 @@
 #include <stdlib.h>
 #include <string.h>
 #include "black_native.h"
+#include "black_win32.h"
+#ifdef _WIN32
+#include <mmsystem.h>
+#else
+#include <pthread.h>
+#include <time.h>
+#endif
+
+/* Vertical blank, natively. On the console the miniport's interrupt sets the device's vblank KEVENT (device +0x1DBC,
+ * header written by D3D itself) 60 times a second, and D3D's BlockUntilVerticalBlank -- inlined in several game
+ * threads, e.g. the loop at 0x1FBD80 -- resets SignalState and waits on it. With no GPU nothing set it: on Windows
+ * every wait failed at once and those threads spun (tens of millions of KeWaitForSingleObject calls), on Linux the
+ * guest address reached the POSIX layer as a handle. A host thread now sets it at the NTSC rate through the kernel's
+ * title-event support (RECOMP_TITLE_KEVENTS=1, set by main.c). */
+#define DEV_VBLANK_EVENT 0x1DBCu
+void xbox_KeSetGuestEvent(uint32_t guest_va);
+static volatile uint32_t s_vblank_dev;
+
+#ifdef _WIN32
+static DWORD WINAPI vblank_thread(LPVOID unused)
+{
+    LARGE_INTEGER f, t0, now;
+    unsigned long long n = 0;
+    (void)unused;
+    timeBeginPeriod(1);
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    for (;;) {
+        long long due = t0.QuadPart + (long long)((double)f.QuadPart * (double)++n / 59.94);
+        for (;;) {
+            QueryPerformanceCounter(&now);
+            if (now.QuadPart >= due) break;
+            if (due - now.QuadPart > f.QuadPart / 500) Sleep(1); else SwitchToThread();
+        }
+        xbox_KeSetGuestEvent(s_vblank_dev + DEV_VBLANK_EVENT);
+    }
+    return 0;
+}
+#else
+static void *vblank_thread(void *unused)
+{
+    struct timespec t;
+    (void)unused;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    for (;;) {
+        t.tv_nsec += 16683350;                     /* 59.94 Hz */
+        if (t.tv_nsec >= 1000000000L) { t.tv_nsec -= 1000000000L; t.tv_sec++; }
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, NULL);
+        xbox_KeSetGuestEvent(s_vblank_dev + DEV_VBLANK_EVENT);
+    }
+    return NULL;
+}
+#endif
+
+static void vblank_start(uint32_t dev)
+{
+    if (s_vblank_dev)
+        return;
+    s_vblank_dev = dev;
+#ifdef _WIN32
+    CloseHandle(CreateThread(NULL, 0, vblank_thread, NULL, 0, NULL));
+#else
+    {
+        pthread_t th;
+        pthread_create(&th, NULL, vblank_thread, NULL);
+        pthread_detach(th);
+    }
+#endif
+    fprintf(stderr, "[BLACK-SYNC] native vertical blank: event at %08X set at 59.94 Hz\n", dev + DEV_VBLANK_EVENT);
+}
 
 #define DEV_PUT        0x000u
 #define DEV_FLAGS      0x008u
@@ -61,6 +131,7 @@ void sub_0026CF10(void)
 {
     uint32_t dev = g_edx, put;
     black_kick_count++;
+    vblank_start(dev);
     if (!(MEM32(dev + DEV_FLAGS) & 0x2000u)) {
         MEM32(dev + DEV_FLAGS) |= 0x2000u;
         fprintf(stderr, "[BLACK-SYNC] native KickOff: library GPU-less path (nothing reaches an NV2A)\n");

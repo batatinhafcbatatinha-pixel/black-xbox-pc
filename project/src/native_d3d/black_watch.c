@@ -3,11 +3,14 @@
  * address, as black_native+0x<offset> for black_native.map. A guard page on the host view of the page(s) traps the
  * access; single-step re-arms it after the instruction. Reads are trapped too but not logged.
  */
-#include <windows.h>
+#include "black_win32.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 
+#ifndef _WIN32
+void black_watch_init(void) {}      /* Windows-only diagnostic (guard pages + vectored handler) */
+#else
 extern ptrdiff_t g_xbox_mem_offset;
 
 static uintptr_t s_lo, s_hi, s_page_lo, s_page_hi;
@@ -64,3 +67,4 @@ void black_watch_init(void)
     arm();
     fprintf(stderr, "[WATCH] guest %08X..%08X (host %p)\n", va, va + bytes, (void *)s_lo);
 }
+#endif

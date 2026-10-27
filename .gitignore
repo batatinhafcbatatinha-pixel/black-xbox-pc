@@ -3,6 +3,7 @@
 # disassembly, Ghidra projects, dumps, captures, saves, logs and builds.
 /*
 !/.gitignore
+!/.gitattributes
 !/*.md
 !/*.cmd
 !/*.ps1

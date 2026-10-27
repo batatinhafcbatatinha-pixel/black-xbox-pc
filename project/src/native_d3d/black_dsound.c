@@ -17,7 +17,7 @@
  * Street 1 (library 0x269D3A there): attenuation in mB = mixbin volume + voice volume - headroom (default 600).
  * 3D positioning, I3DL2 and the effects DSP are accepted and not processed.
  */
-#include <windows.h>
+#include "black_win32.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

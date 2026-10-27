@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -13,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / 'project'
 TOOLKIT = ROOT.parent / 'xboxrecomp'
 EXPECTED = 'df2739c372d254a90aeeccf5971d12097f22d89fbb90db021fda96dd4deb68f6'
-BUILD = Path(os.environ.get('BLACK_BUILD_ROOT', str(PROJECT / 'out'))).resolve()
+WINDOWS = os.name == 'nt'
+BUILD = Path(os.environ.get('BLACK_BUILD_ROOT', str(PROJECT / ('out' if WINDOWS else 'out-linux')))).resolve()
 
 
 def guard():
@@ -36,7 +38,10 @@ def run(command, cwd, log):
                 guard()
                 time.sleep(2)
         except BaseException:
-            subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'], capture_output=True)
+            if WINDOWS:
+                subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'], capture_output=True)
+            else:
+                proc.kill()
             proc.wait()
             raise
         if proc.returncode:
@@ -113,9 +118,11 @@ def main():
     subprocess.run([sys.executable, str(ROOT / 'scripts/make_native_copies.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'scripts/apply_native_overrides.py')], check=True)
     run(['cmake', '-S', PROJECT, '-B', BUILD, '-G', 'Ninja',
-         '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_C_COMPILER=clang-cl'], ROOT, 'native-configure.log')
+         '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_C_COMPILER=' + ('clang-cl' if WINDOWS else 'clang'),
+         # e.g. BLACK_CMAKE_ARGS="-DDXVK_NATIVE_DIR=... -DVKD3D_DIR=..." on Linux
+         *shlex.split(os.environ.get('BLACK_CMAKE_ARGS', ''))], ROOT, 'native-configure.log')
     if args.stage == 'build':
-        run(['cmake', '--build', BUILD, '--parallel', '2'], ROOT, 'native-build.log')
+        run(['cmake', '--build', BUILD, '--parallel', os.environ.get('BLACK_BUILD_JOBS', '2')], ROOT, 'native-build.log')
         (ROOT / 'build-location.txt').write_text(str(BUILD) + '\n', encoding='utf-8')
 
 

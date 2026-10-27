@@ -17,15 +17,16 @@
  * movie loop does not). black_skip_hides_a() is used by black_input.c to keep the A press that triggered the skip
  * out of the guest until it is released, so the same press cannot fire a shot or pick a menu entry afterwards.
  */
-#include <windows.h>
+#include "black_win32.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include "black_native.h"
 
 int usb_gamepad_report(int pad, uint8_t *out, int max);
+int xbox_FramebufferKeyDown(int vk);
 
 #define PAD_BUTTON_A 4           /* XINPUT_GAMEPAD.bAnalogButtons[0] = A (report byte 4, 0xFF when pressed) */
-#define SKIP_KEY     VK_F10
+#define SKIP_KEY     0x79        /* VK_F10, read from the game window (xbox_FramebufferKeyDown) */
 #define REGAP_MS     250         /* no movie step for this long: forget the previous sample */
 
 static DWORD s_last_tick;
@@ -55,7 +56,7 @@ int black_cutscene_skip(void)
         return 1;
     usb_gamepad_report(0, rep, 20);
     a = rep[PAD_BUTTON_A] != 0;
-    key = (GetAsyncKeyState(SKIP_KEY) & 0x8000) != 0;
+    key = xbox_FramebufferKeyDown(SKIP_KEY) != 0;
     if (s_hide_a && !a)
         s_hide_a = 0;
     /* Movies are stepped every frame, so a real gap means a new movie: the first sample must not look like a press. */

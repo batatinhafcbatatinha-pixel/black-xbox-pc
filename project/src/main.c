@@ -46,10 +46,23 @@ int main(int argc, char **argv) {
     char xbe[MAX_PATH];
     void *data = NULL;
     size_t bytes = 0;
-    if (snprintf(xbe, sizeof(xbe), "%s\\default.xbe", game) >= (int)sizeof(xbe)
+#ifdef _WIN32
+    const char *sep = "\\";
+#else
+    const char *sep = "/";
+#endif
+    if (snprintf(xbe, sizeof(xbe), "%s%sdefault.xbe", game, sep) >= (int)sizeof(xbe)
             || !load(xbe, &data, &bytes)) {
         fprintf(stderr, "Black USA default.xbe missing or wrong identity: %s\n", game);
         return 2;
+    }
+    /* The device's vblank KEVENT is built by D3D itself; black_sync.c sets it natively (kernel title events). */
+    if (!getenv("RECOMP_TITLE_KEVENTS")) {
+#ifdef _WIN32
+        _putenv_s("RECOMP_TITLE_KEVENTS", "1");
+#else
+        setenv("RECOMP_TITLE_KEVENTS", "1", 0);
+#endif
     }
 #ifdef BLACK_NATIVE_HOST
     xbox_SetNoHardware(1);
