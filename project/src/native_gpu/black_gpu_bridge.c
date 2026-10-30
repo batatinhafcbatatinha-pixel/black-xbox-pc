@@ -67,6 +67,7 @@ int BlackGpuAttachMemory(ptrdiff_t offset, BlackGpuKeyCallback callback) {
 const char* BlackGpuApiName(uint32_t va) { const Binding* b=find(va);return b?b->name:NULL; }
 int BlackGpuApiCount(void) { return sizeof(bindings)/sizeof(bindings[0]); }
 int BlackGpuReady(void) { return attached && g_hle.dev!=NULL; }
+int BlackGpuAbNewOff(void) { extern int hle_ab_new_off; return hle_ab_new_off; }
 /* BLACK_GPU_STATS=<swaps>: per-API call counts (game calls, depth 0) every N swaps. */
 static unsigned long long s_api_calls[256];
 static void api_stats(const Binding* b, int depth, int phase) {
