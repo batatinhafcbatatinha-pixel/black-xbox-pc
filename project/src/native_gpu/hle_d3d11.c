@@ -1487,12 +1487,14 @@ static void profile_frame(double ms, double draw_ms, double present_ms, double b
     if (!n) {
         uint64_t skipped, tris;
         static int ab = -1;
-        extern int hle_ab_off;
+        extern int hle_ab_off, hle_ab_new_off;
         if (ab < 0) {
             const char *e = getenv("RECOMP_HLE_AB");
-            ab = e && *e && *e != '0';
+            ab = e && *e && *e != '0' ? (atoi(e) == 2 ? 2 : 1) : 0;
         }
-        if (ab)
+        if (ab == 2)
+            hle_ab_new_off = !hle_ab_new_off;
+        else if (ab)
             hle_ab_off = !hle_ab_off;
         first_swap = g_hle.swaps;
         hle_draw_stats(&draws0, &skipped, &tris);
@@ -1519,11 +1521,11 @@ static void profile_frame(double ms, double draw_ms, double present_ms, double b
         th = profile_cpu_ticks(0);
         pr = profile_cpu_ticks(1);
         if (!wall) wall = 1;
-        extern int hle_ab_off;
-        fprintf(stderr, "[HLE-PROF]%s swaps %llu-%llu: frame %.2f ms (max %.1f, >20 ms %u), %.0f draws/frame, "
+        extern int hle_ab_off, hle_ab_new_off;
+        fprintf(stderr, "[HLE-PROF]%s%s swaps %llu-%llu: frame %.2f ms (max %.1f, >20 ms %u), %.0f draws/frame, "
                 "draw %.3f ms (max %.2f), present %.3f, limiter wait %.2f, builds %.3f; "
                 "render thread %.0f%%, process %.0f%% of a core; worst frame: draw %.2f present %.2f builds %.2f wait %.2f\n",
-                hle_ab_off ? " [opt off]" : "", (unsigned long long)first_swap, (unsigned long long)g_hle.swaps, sum_ms / f, max_ms, slow,
+                hle_ab_off ? " [opt off]" : "", hle_ab_new_off ? " [new off]" : "", (unsigned long long)first_swap, (unsigned long long)g_hle.swaps, sum_ms / f, max_ms, slow,
                 (double)(draws - draws0) / f, sum_draw / f, max_draw, sum_present / f, sum_wait / f, sum_build / f,
                 (double)(th - thread0) / 100.0 / (double)wall, (double)(pr - process0) / 100.0 / (double)wall,
                 worst[0], worst[1], worst[2], worst[3]);
