@@ -1,3 +1,16 @@
+# Checkpoint — 30/10/2026 tarde (Claude): partículas nativas
+
+- `native_d3d/black_particles.c`: 0x0015B380 (simula, recorta e colore as partículas de um emissor, 1024 por vez,
+  e desenha por 0x0002AC00) e o callback de quads 0x0015BF30 em C nativo, portados operação por operação do código
+  traduzido (mesma ordem de operações float, minss/maxss, cvttss2si, sin/cos via double): vértices bit a bit iguais.
+  Eram ~10% da thread do jogo na missão 1 (o código traduzido passa todo temporário pela pilha do guest via volatile).
+- `BLACK_NATIVE_PARTICLES=0` volta ao traduzido; `BLACK_PARTICLES_CHECK=1` roda o traduzido com os draws capturados e
+  depois o nativo, comparando cada lote byte a byte (435 mil atualizações de emissor, 0 diferenças);
+  `RECOMP_HLE_AB=2` alterna (export novo `BlackGpuAbNewOff` da DLL).
+- A/B na mesma sessão (missão 1, 1080p sem limite): 67,9 -> 72,2 fps. /O2 no código traduzido não ganhou nada
+  (73,0 vs 73,2 fps): o acesso volatile à memória domina; voltou a /O1.
+- Perfil depois: código do jogo plano (maior função 1,5%); a thread fica ~16% esperando no Present (GPU perto do limite).
+
 # Checkpoint — 30/10/2026 (Claude): desempenho da missão 1
 
 - Causa principal da lentidão local: o cache do CMake em `project/out` tinha `CMAKE_C_FLAGS_RELEASE` vazio, então o

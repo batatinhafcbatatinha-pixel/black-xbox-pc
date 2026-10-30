@@ -30,6 +30,8 @@ BLACK_GPU_API int BlackGpuReady(void);
 enum { BLACK_MOUSE_LEFT = 1, BLACK_MOUSE_RIGHT = 2, BLACK_MOUSE_MIDDLE = 4, BLACK_MOUSE_X1 = 8, BLACK_MOUSE_X2 = 16 };
 BLACK_GPU_API void BlackGpuMouseRead(int* dx, int* dy, unsigned* buttons, int* wheel);
 BLACK_GPU_API void BlackGpuMouseCapture(int on);
+/* RECOMP_HLE_AB=2 measurement: 1 while the renderer's profiler has the newest additions switched off. */
+BLACK_GPU_API int BlackGpuAbNewOff(void);
 #ifdef __cplusplus
 }
 #endif
