@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.25)
 project(black LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+# A reused cache can hold an empty CMAKE_C_FLAGS_RELEASE, which built the kernel runtime and the renderer DLL
+# without optimisation (~2x slower draw path); a fresh configure has /O2. Restore it when it is missing.
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT CMAKE_C_FLAGS_RELEASE MATCHES "/O")
+  set(CMAKE_C_FLAGS_RELEASE "/O2 /Ob2 /DNDEBUG" CACHE STRING "Release flags" FORCE)
+endif()
 # The xboxrecomp submodule when it is checked out, else the author's neighbouring checkout.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../xboxrecomp/src/kernel/CMakeLists.txt")
   set(_black_toolkit "${CMAKE_CURRENT_SOURCE_DIR}/../xboxrecomp")
@@ -72,6 +77,9 @@ target_compile_definitions(black_native_gpu PRIVATE BLACK_GPU_BUILD WIN32_LEAN_A
 target_link_libraries(black_native_gpu PRIVATE d3d11 dxgi dxguid d3dcompiler user32 gdi32 winmm xinput delayimp)
 # Vulkan option: d3d11/dxgi are delay-loaded so hle_gpu_api_load() can bind DXVK (vulkan\ next to the exe) first.
 target_link_options(black_native_gpu PRIVATE /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll)
+# Line tables only (no codegen change): lets sample profilers/cdb attribute renderer time.
+target_compile_options(black_native_gpu PRIVATE -gline-tables-only)
+target_link_options(black_native_gpu PRIVATE /DEBUG)
 set(BLACK_DXVK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/dxvk" CACHE PATH "DXVK Windows DLLs (d3d11.dll, dxgi.dll)")
 if(EXISTS "${BLACK_DXVK_DIR}/d3d11.dll")
   add_custom_command(TARGET black_native_gpu POST_BUILD

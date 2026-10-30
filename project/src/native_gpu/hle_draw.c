@@ -174,6 +174,8 @@ static struct {
 /* RECOMP_HLE_AB=1 (measurement): hle_d3d11.c's profiler turns the draw-path
  * optimisations off for every other 600-frame window. */
 int hle_ab_off;
+/* RECOMP_HLE_AB=2: only the 2026-10-30 additions alternate (same windows). */
+int hle_ab_new_off;
 
 void hle_draw_state_invalidate(void)
 {
@@ -1708,6 +1710,9 @@ typedef struct {
 static uint32_t s_pb_pos, s_pb_const, s_pb_prog_load;
 static uint32_t s_pb_prog[136][4];
 static int s_pb_on = -1;
+/* Skip index/inline-data blocks whole (they hold no state); BLACK_PB_NO_FASTSKIP=1 reads them word by word. */
+static int s_pb_noskip = -1;
+#define s_pb_fast (!s_pb_noskip && !hle_ab_new_off)
 uint64_t g_pb_begins, g_pb_resync;
 
 static void pb_resync(uint32_t at, uint32_t put, uint32_t w, const char *why)
@@ -1837,6 +1842,10 @@ static void pb_track_body(void)
     }
     if (!s_pb_on)
         return;
+    if (s_pb_noskip < 0) {
+        const char *e = getenv("BLACK_PB_NO_FASTSKIP");
+        s_pb_noskip = e && *e && *e != '0';
+    }
     {
         /* Draws in the push buffer (BEGIN_END) against draws this renderer made: the difference is geometry the
          * game pushed itself. Reported every 600 swaps. */
@@ -1920,6 +1929,10 @@ static void pb_track_body(void)
         va += 4;
         if ((w >> 13) & 7u) {                       /* other subchannels: not 3D state */
             va = end;
+            continue;
+        }
+        if ((w & 0x40000000u) && (method == 0x1800u || method == 0x1808u || method == 0x1818u) && s_pb_fast) {
+            va = end;                               /* index / inline vertex data: no state in it */
             continue;
         }
         for (k = 0; k < count; k++, va += 4) {

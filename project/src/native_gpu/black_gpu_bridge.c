@@ -36,9 +36,22 @@ int hle_trace_on(void) {
 int hle_trace_black_wanted(void) { return 0; }
 void hle_trace_arm_next(void) {}
 
+/* Every routed call looks its binding up twice (phase 0 and 1): an open-addressed table instead of a scan. */
+#define BIND_SLOTS 256
+static const Binding* s_bind_slot[BIND_SLOTS];
+static volatile int s_bind_built;
+static unsigned bind_hash(uint32_t va) { return (va * 0x9E3779B1u) >> 24; }
 static const Binding* find(uint32_t va) {
-    for (unsigned i=0;i<sizeof(bindings)/sizeof(bindings[0]);++i)
-        if(bindings[i].va==va) return &bindings[i];
+    unsigned h;
+    if(!s_bind_built) {
+        for (unsigned i=0;i<sizeof(bindings)/sizeof(bindings[0]);++i) {
+            for(h=bind_hash(bindings[i].va);s_bind_slot[h]&&s_bind_slot[h]->va!=bindings[i].va;h=(h+1)&(BIND_SLOTS-1)) {}
+            if(!s_bind_slot[h]) s_bind_slot[h]=&bindings[i];   /* first entry wins, as the scan did */
+        }
+        s_bind_built=1;
+    }
+    for(h=bind_hash(va);s_bind_slot[h];h=(h+1)&(BIND_SLOTS-1))
+        if(s_bind_slot[h]->va==va) return s_bind_slot[h];
     return NULL;
 }
 int BlackGpuAttachMemory(ptrdiff_t offset, BlackGpuKeyCallback callback) {

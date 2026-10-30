@@ -1,3 +1,16 @@
+# Checkpoint — 30/10/2026 (Claude): desempenho da missão 1
+
+- Causa principal da lentidão local: o cache do CMake em `project/out` tinha `CMAKE_C_FLAGS_RELEASE` vazio, então o
+  runtime (kernel) e a DLL do renderer eram compilados SEM otimização (o AOT tem /O1 próprio). Um configure novo já
+  usa /O2; o CMakeLists agora restaura `/O2 /Ob2 /DNDEBUG` quando falta. A DLL ganhou tabelas de linha
+  (`-gline-tables-only` + `/DEBUG`, sem mudar o código gerado) para o profiler.
+- Renderer: o rastreador do push buffer pula blocos de dados de índice/vértice inline (0x1800/0x1808/0x1818 sem
+  incremento) de uma vez — não têm estado (`BLACK_PB_NO_FASTSKIP=1` volta a ler palavra por palavra); busca das
+  ligações da API por tabela hash em vez de varredura linear. `RECOMP_HLE_AB=2` alterna só essas adições.
+- Medido (RTX 3050, 1080p, sem limite, missão 1, mesmo roteiro): 51,4 fps / draw 4,55 ms (build antigo) ->
+  ~70 fps / draw ~2,0 ms. A/B na mesma sessão: draw 2,35 -> 2,0 ms com o pulo. Imagem conferida igual à do build antigo.
+- Perfil restante: código do jogo (AOT) ~55% e espalhado; renderer ~14%.
+
 # Checkpoint — 27/10/2026 noite (Claude): suporte a Linux, vblank nativo
 
 - **Linux**: o mesmo código compila com clang no Linux (WSL2 Ubuntu 24.04) e roda até a missão 1 (WSLg, Vulkan em
