@@ -2,3 +2,7 @@
 	path = xboxrecomp
 	url = https://github.com/batatinhafcbatatinha-pixel/xboxrecomp.git
 	branch = ports
+
+[submodule "tools/port-installer"]
+	path = tools/port-installer
+	url = https://github.com/batatinhafcbatatinha-pixel/port-installer.git
