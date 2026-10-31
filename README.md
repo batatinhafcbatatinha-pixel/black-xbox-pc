@@ -88,6 +88,10 @@ PYTHON=~/black-py/bin/python BLACK_CMAKE_ARGS="-DDXVK_NATIVE_DIR=/opt/dxvk-nativ
 The binary goes to `project/out-linux/` with DXVK and vkd3d in `lib/` next to it and `black-pc.ini` beside it.
 PC Settings, the controls and the test options above work the same way (on Linux the Graphics API is always Vulkan).
 
+### macOS
+
+Experimental and not compiled or run yet: see [MACOS.md](MACOS.md).
+
 ## What is in this repository
 
 - `scripts/` — ISO inspection/extraction, game-file verification, analysis pipeline, boot/leaf/missing-function recovery, native-instruction lowering and GPU wrapper generation.
