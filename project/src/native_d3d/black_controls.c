@@ -157,6 +157,34 @@ static void config(void)
             cfg.invert ? ", inverted" : "", ini);
 }
 
+/* The PC settings menu (another module) publishes its sliders as process variables. */
+static void mouse_settings_refresh(ULONGLONG now)
+{
+    static ULONGLONG next;
+    if (now < next)
+        return;
+    next = now + 1000;
+#ifdef _WIN32
+    char v[32];
+    if (GetEnvironmentVariableA("BLACK_MOUSE_SENS_LIVE", v, sizeof v)) {
+        float sens = (float)atof(v);
+        if (sens > 0.0f && sens <= 20.0f)
+            cfg.sens = sens;
+    }
+    if (GetEnvironmentVariableA("BLACK_MOUSE_INVERT_LIVE", v, sizeof v))
+        cfg.invert = v[0] == '1';
+#else
+    const char *e = getenv("BLACK_MOUSE_SENS_LIVE");
+    if (e) {
+        float sens = (float)atof(e);
+        if (sens > 0.0f && sens <= 20.0f)
+            cfg.sens = sens;
+    }
+    if ((e = getenv("BLACK_MOUSE_INVERT_LIVE")))
+        cfg.invert = e[0] == '1';
+#endif
+}
+
 static int key(int vk) { return xbox_FramebufferKeyDown(vk) != 0; }
 
 /* A press of `ms` milliseconds started now (or kept going). */
@@ -238,6 +266,7 @@ void black_controls_apply(uint8_t rep[20])
     if (wheel_acc <= -WHEEL_DELTA) { wheel_acc = 0; pulse(&next_pulse, now, 90); }
 
     /* Mouse look: velocity over the time since the last conversion, as a right-stick deflection. */
+    mouse_settings_refresh(now);
     mouse_acc_x += dx;
     mouse_acc_y += dy;
     if (!mouse_at) mouse_at = now;

@@ -40,9 +40,18 @@ int main(int argc, char **argv) {
     #ifdef BLACK_NATIVE_HOST
     extern void xa2_set_volume(float volume);
     BlackGpuInitOptions(xa2_set_volume);
+    #ifdef _WIN32
+    {
+        extern DWORD xbox_InputGetRaw(DWORD port, void *state);
+        BlackGpuSetPadReader((unsigned long (*)(unsigned long, void *))xbox_InputGetRaw);
+    }
+    #endif
     #endif
     /* Caller selects a data directory; no copy or extraction is performed. */
     const char *game = argc > 1 ? argv[1] : "game_files";
+#ifdef _WIN32
+    SetEnvironmentVariableA("BLACK_GAME_DIR", game);    /* the settings menu reads the game's own font */
+#endif
     char xbe[MAX_PATH];
     void *data = NULL;
     size_t bytes = 0;

@@ -16,6 +16,11 @@ void hle_stall_tick(void){} /* diagnostic watchdog is not part of frame semantic
 
 static BlackGpuVolumeCallback s_volume_callback;
 void black_options_volume(float volume) { if (s_volume_callback) s_volume_callback(volume); }
+#ifdef _WIN32
+void hle_options_set_pad_reader(unsigned long (*reader)(unsigned long, void *));
+void BlackGpuSetPadReader(unsigned long (*reader)(unsigned long, void *)) { hle_options_set_pad_reader(reader); }
+#endif
+
 void BlackGpuInitOptions(BlackGpuVolumeCallback callback) {
     s_volume_callback = callback;
 #ifdef _WIN32

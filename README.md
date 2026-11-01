@@ -17,6 +17,10 @@ Early work on a port of the original-Xbox game *Black* (USA), built through ahea
   post passes) are read back and drawn natively.
 - DirectSound runs natively through XAudio2; controller input replaces XInput/XPP without the USB stack.
 
+## Controllers
+
+Xbox pads use XInput. On Windows, `SDL3.dll` next to the executable adds every other pad SDL knows: DualShock 3/4, DualSense, Switch pads, USB adapters for PS2 and original Xbox pads. `tools/build_local.py` downloads it with `gamecontrollerdb.txt` (both zlib license); `tools/fetch_pad_support.py` does the same for a manual build. Without those files the port behaves as before. No PlayStation pad or adapter has been tried on real hardware yet.
+
 ## Playing
 
 `Jogar-Black.cmd` starts `project\out\black_native.exe` with `game_files\` (your extracted disc).

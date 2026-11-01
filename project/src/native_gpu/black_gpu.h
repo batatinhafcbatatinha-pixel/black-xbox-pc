@@ -18,6 +18,8 @@ extern "C" {
 typedef struct BlackGpuCall { uint32_t gpr[8]; uint32_t stack[6]; } BlackGpuCall;
 typedef void (*BlackGpuVolumeCallback)(float volume);
 BLACK_GPU_API void BlackGpuInitOptions(BlackGpuVolumeCallback volume_callback);
+/* The settings menu's controller reader (port, XINPUT_STATE*): XInput and SDL pads, from the executable. */
+BLACK_GPU_API void BlackGpuSetPadReader(unsigned long (*reader)(unsigned long port, void *state));
 typedef void (*BlackGpuKeyCallback)(int key, int down);
 BLACK_GPU_API int BlackGpuAttachMemory(ptrdiff_t address_offset, BlackGpuKeyCallback key_callback);
 BLACK_GPU_API int BlackGpuRoute(uint32_t function_va, int phase, int call_depth,

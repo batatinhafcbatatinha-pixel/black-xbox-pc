@@ -23,6 +23,8 @@ typedef struct HleOptions {
     int language;     /* EEPROM language: 1 English, 5 Spanish        (restart) */
     int volume;       /* 0..100 */
     int ui_language;  /* 0 Portuguese, 1 English (applies immediately) */
+    int mouse_sens;   /* mouse look sensitivity, percent (10..500) */
+    int mouse_invert; /* invert the mouse's vertical axis */
 } HleOptions;
 
 extern HleOptions g_opt;

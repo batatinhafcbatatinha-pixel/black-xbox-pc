@@ -29,6 +29,13 @@
 #include <math.h>
 #ifdef _WIN32
 #include <xinput.h>
+/* The executable hands in xbox_InputGetRaw (xinput_device.c: XInput or SDL pads). */
+static unsigned long (*s_pad_reader)(unsigned long, void *);
+void hle_options_set_pad_reader(unsigned long (*reader)(unsigned long, void *)) { s_pad_reader = reader; }
+static DWORD pad_get_state(DWORD port, XINPUT_STATE *st)
+{
+    return s_pad_reader ? (DWORD)s_pad_reader(port, st) : XInputGetState(port, st);
+}
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -63,6 +70,7 @@
 typedef struct { WORD wButtons; BYTE bLeftTrigger, bRightTrigger; SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY; } XINPUT_GAMEPAD;
 typedef struct { DWORD dwPacketNumber; XINPUT_GAMEPAD Gamepad; } XINPUT_STATE;
 
+#define pad_get_state XInputGetState
 /* The menu's view of controller i, as XInput would give it. */
 static DWORD XInputGetState(DWORD i, XINPUT_STATE *st)
 {
@@ -154,6 +162,35 @@ static int ini_get(const wchar_t *key, int def)
     return _wtoi(b);
 }
 
+#ifdef _WIN32
+/* The ini's narrow path, for its [controles] section (black_controls.c). */
+static const char *mouse_ini(void)
+{
+    static char a[MAX_PATH * 3];
+    WideCharToMultiByte(CP_ACP, 0, s_ini, -1, a, sizeof a, NULL, NULL);
+    return a;
+}
+#endif
+
+/* black_controls.c lives in the game module: it reads these two process variables once a second,
+ * so the sliders act while the game is held in this menu's next frames. */
+static void mouse_publish(void)
+{
+    char v[32];
+    snprintf(v, sizeof v, "%.2f", g_opt.mouse_sens / 100.0);
+#ifdef _WIN32
+    SetEnvironmentVariableA("BLACK_MOUSE_SENS_LIVE", v);
+    SetEnvironmentVariableA("BLACK_MOUSE_INVERT_LIVE", g_opt.mouse_invert ? "1" : "0");
+    if (s_use_ini) {
+        WritePrivateProfileStringA("controles", "sensibilidade_mouse", v, mouse_ini());
+        WritePrivateProfileStringA("controles", "inverter_mouse", g_opt.mouse_invert ? "1" : "0", mouse_ini());
+    }
+#else
+    _putenv_s("BLACK_MOUSE_SENS_LIVE", v);
+    _putenv_s("BLACK_MOUSE_INVERT_LIVE", g_opt.mouse_invert ? "1" : "0");
+#endif
+}
+
 static void ini_put(const wchar_t *key, int v)
 {
     wchar_t b[32];
@@ -183,6 +220,7 @@ static void save_ini(void)
     ini_put(L"idioma", g_opt.language);
     ini_put(L"volume", g_opt.volume);
     ini_put(L"idioma_menu", g_opt.ui_language);
+    mouse_publish();
 }
 
 static int clampi(int v, int lo, int hi)
@@ -256,6 +294,15 @@ void hle_options_init(void)
     slash = wcsrchr(s_ini, L'\\');
     wcscpy(slash ? slash + 1 : s_ini, L"black-pc.ini");
 
+    g_opt.mouse_sens = 100;
+#ifdef _WIN32
+    {
+        char v[32];
+        GetPrivateProfileStringA("controles", "sensibilidade_mouse", "1.0", v, sizeof v, mouse_ini());
+        g_opt.mouse_sens = clampi((int)(atof(v) * 100.0 + 0.5), 10, 500);
+        g_opt.mouse_invert = GetPrivateProfileIntA("controles", "inverter_mouse", 0, mouse_ini()) != 0;
+    }
+#endif
     g_opt.display = clampi(ini_get(L"modo_tela", 1), 0, 2);
     g_opt.monitor = clampi(ini_get(L"monitor", 0), 0, 15);
     g_opt.refresh = clampi(ini_get(L"taxa_hz", 0), 0, 1000);
@@ -761,7 +808,7 @@ void hle_options_apply_display(uint32_t pw, uint32_t ph)
 
 enum {
     IT_DISPLAY, IT_MONITOR, IT_REFRESH, IT_VSYNC, IT_FPS, IT_SCALE, IT_ASPECT, IT_AA, IT_MSAA, IT_ANISO,
-    IT_API, IT_GPU, IT_UI_LANG, IT_LANG, IT_VOLUME, IT_RESUME, IT_RESTART, IT_QUIT, IT_COUNT
+    IT_API, IT_GPU, IT_UI_LANG, IT_LANG, IT_VOLUME, IT_MOUSE_SENS, IT_MOUSE_INV, IT_RESUME, IT_RESTART, IT_QUIT, IT_COUNT
 };
 
 static volatile LONG s_request;             /* asked to open (window thread or pad) */
@@ -946,6 +993,8 @@ static void change(int it, int d)
         g_opt.language = cycle(list, n, g_opt.language, d);
         break;
     case IT_VOLUME: g_opt.volume = clampi(g_opt.volume + 10 * d, 0, 100); break;
+    case IT_MOUSE_SENS: g_opt.mouse_sens = clampi(g_opt.mouse_sens + 10 * d, 10, 500); mouse_publish(); break;
+    case IT_MOUSE_INV: g_opt.mouse_invert = !g_opt.mouse_invert; mouse_publish(); break;
     }
     s_dirty = 1;
 }
@@ -1111,7 +1160,7 @@ static WORD pads_read(int probe_all)
         XINPUT_STATE st;
         if (!s_pad_seen[i] && !probe_all && (s_pad_probe % 240u) != (unsigned)i * 60u)
             continue;
-        if (XInputGetState((DWORD)i, &st) != ERROR_SUCCESS) {
+        if (pad_get_state((DWORD)i, &st) != ERROR_SUCCESS) {
             s_pad_seen[i] = 0;
             continue;
         }
@@ -1431,9 +1480,168 @@ static void surface_resize(int pw, int ph, int lh)
     s_dirty = 1;
 }
 
+/* The game's own menu font, language\\fonts\\Big.bin in the player's game files (read at run time,
+ * never shipped): a 256x256 DXT3 atlas after a D3D texture header, and from 0x220 on one 40-byte record
+ * per character: u, v, width, height, x offset, y offset, advance (fractions of the atlas), then the
+ * Windows-1252 code. Capitals only, as the game writes its menus. */
+#ifdef _WIN32
+typedef struct { float u, v, w, h, xo, yo, adv; int used; } GameGlyph;
+static struct { uint8_t *alpha; int size; GameGlyph g[256]; int tried; } s_gf;
+
+static void game_font_load(void)
+{
+    char dir[MAX_PATH], path[MAX_PATH + 40];
+    FILE *fp;
+    uint8_t *d = NULL;
+    long n;
+    uint32_t tex, fmt, off;
+    int w, h, bx, by, i;
+
+    if (s_gf.tried)
+        return;
+    s_gf.tried = 1;
+    if (!GetEnvironmentVariableA("BLACK_GAME_DIR", dir, sizeof dir))
+        return;
+    snprintf(path, sizeof path, "%s\\language\\fonts\\Big.bin", dir);
+    if (!(fp = fopen(path, "rb")))
+        return;
+    fseek(fp, 0, SEEK_END);
+    n = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (n > 0x300 && (d = (uint8_t *)malloc((size_t)n)) && fread(d, 1, (size_t)n, fp) != (size_t)n) {
+        free(d);
+        d = NULL;
+    }
+    fclose(fp);
+    if (!d)
+        return;
+    memcpy(&tex, d + 4, 4);
+    if (memcmp(d, "4.1v", 4) || tex + 144 > (uint32_t)n)
+        goto done;
+    memcpy(&fmt, d + tex + 12, 4);
+    w = 1 << ((fmt >> 20) & 15);
+    h = 1 << ((fmt >> 24) & 15);
+    if (((fmt >> 8) & 255) != 0x0E || w != h || (long)tex + 128 + (long)w * h > n)   /* DXT3 */
+        goto done;
+    if (!(s_gf.alpha = (uint8_t *)malloc((size_t)w * h)))
+        goto done;
+    s_gf.size = w;
+    for (by = 0; by < h / 4; by++)
+        for (bx = 0; bx < w / 4; bx++) {
+            const uint8_t *b = d + tex + 128 + (by * (w / 4) + bx) * 16;
+            for (i = 0; i < 16; i++)
+                s_gf.alpha[(by * 4 + i / 4) * w + bx * 4 + i % 4] = (uint8_t)(((b[i / 2] >> (4 * (i & 1))) & 15) * 17);
+        }
+    for (off = 0x220; off + 40 <= tex; off += 40) {
+        float r[7];
+        uint32_t code;
+        memcpy(r, d + off, sizeof r);
+        memcpy(&code, d + off + 28, 4);
+        if (code < 256) {
+            GameGlyph *g = &s_gf.g[code];
+            g->u = r[0]; g->v = r[1]; g->w = r[2]; g->h = r[3]; g->xo = r[4]; g->yo = r[5]; g->adv = r[6];
+            g->used = 1;
+        }
+    }
+    fprintf(stderr, "[OPTIONS] game font loaded: %dx%d\n", w, h);
+done:
+    free(d);
+}
+
+static const GameGlyph *game_glyph(wchar_t c)
+{
+    if (c >= L'a' && c <= L'z')
+        c = (wchar_t)(c - 32);
+    else if (c >= 0xE0 && c <= 0xFE && c != 0xF7)
+        c = (wchar_t)(c - 32);
+    if (c == 0x2014 || c == 0x2013)
+        c = L'-';
+    if (c == 0x2190 || c == 0x2192)
+        c = L' ';
+    if (c >= 256 || !s_gf.g[c].used)
+        return s_gf.g[L' '].used ? &s_gf.g[L' '] : NULL;
+    return &s_gf.g[c];
+}
+
+/* Text height in pixels for each of the menu's four sizes. */
+static float game_font_scale(HFONT f)
+{
+    int px = f == s_font_title ? s_lh * 135 / 100 : f == s_font_small ? s_lh * 66 / 100 : s_lh * 88 / 100;
+    return (float)px / (0.0859375f * (float)s_gf.size);
+}
+
+static int game_text_width(const wchar_t *s, float scale)
+{
+    float w = 0.0f;
+    for (; *s; s++) {
+        const GameGlyph *g = game_glyph(*s);
+        if (g)
+            w += g->adv * (float)s_gf.size * scale;
+    }
+    return (int)(w + 0.5f);
+}
+
+static void game_text(const wchar_t *s, int x0, int y0, int x1, int y1, COLORREF c, HFONT f, UINT align)
+{
+    float scale = game_font_scale(f), x, size = (float)s_gf.size;
+    int width = game_text_width(s, scale), top;
+    int r = GetRValue(c), g = GetGValue(c), b = GetBValue(c);
+
+    GdiFlush();
+    x = (float)((align & DT_RIGHT) ? x1 - width : (align & DT_CENTER) ? (x0 + x1 - width) / 2 : x0);
+    top = (y0 + y1) / 2 - (int)(0.0859375f * size * scale / 2.0f);
+    for (; *s; s++) {
+        const GameGlyph *gl = game_glyph(*s);
+        int px, py, w, h;
+        if (!gl)
+            continue;
+        w = (int)(gl->w * size * scale + 0.5f);
+        h = (int)(gl->h * size * scale + 0.5f);
+        for (py = 0; py < h; py++) {
+            int dy = top + py;
+            if (dy < 0 || dy >= s_ph)
+                continue;
+            for (px = 0; px < w; px++) {
+                int dx = (int)x + px, sx0, sy0, a, ia;
+                float fx, fy, sx, sy, v;
+                uint32_t *d;
+                uint8_t *row;
+                if (dx < x0 || dx >= x1 || dx < 0 || dx >= s_pw)
+                    continue;
+                sx = (gl->u + gl->w * ((float)px + 0.5f) / (float)w) * size - 0.5f;
+                sy = (gl->v + gl->h * ((float)py + 0.5f) / (float)h) * size - 0.5f;
+                sx0 = (int)sx; sy0 = (int)sy;
+                if (sx0 < 0 || sy0 < 0 || sx0 + 1 >= s_gf.size || sy0 + 1 >= s_gf.size)
+                    continue;
+                fx = sx - (float)sx0; fy = sy - (float)sy0;
+                row = s_gf.alpha + sy0 * s_gf.size + sx0;
+                v = (row[0] * (1.0f - fx) + row[1] * fx) * (1.0f - fy) +
+                    (row[s_gf.size] * (1.0f - fx) + row[s_gf.size + 1] * fx) * fy;
+                a = (int)v;
+                if (a <= 0)
+                    continue;
+                ia = 255 - a;
+                d = s_bits + dy * s_pw + dx;
+                *d = (((((*d >> 16) & 255) * ia + r * a) / 255) << 16) |
+                     (((((*d >> 8) & 255) * ia + g * a) / 255) << 8) |
+                     ((((*d & 255) * ia + b * a) / 255));
+            }
+        }
+        x += gl->adv * size * scale;
+    }
+}
+#endif
+
 static void text(const wchar_t *s, int x0, int y0, int x1, int y1, COLORREF c, HFONT f, UINT align)
 {
     RECT r;
+#ifdef _WIN32
+    game_font_load();
+    if (s_gf.alpha) {
+        game_text(s, x0, y0, x1, y1, c, f, align);
+        return;
+    }
+#endif
     SetRect(&r, x0, y0, x1, y1);
     SelectObject(s_dc, f);
     SetTextColor(s_dc, c);
@@ -1460,6 +1668,11 @@ static void text_sh(const wchar_t *s, int x0, int y0, int x1, int y1, COLORREF c
 static int text_width(const wchar_t *s, HFONT f)
 {
     SIZE sz;
+#ifdef _WIN32
+    game_font_load();
+    if (s_gf.alpha)
+        return game_text_width(s, game_font_scale(f));
+#endif
     SelectObject(s_dc, f);
     GetTextExtentPoint32W(s_dc, s, (int)wcslen(s), &sz);
     return sz.cx;
@@ -1659,6 +1872,14 @@ static void item_text(int it, wchar_t *label, wchar_t *value, int *greyed)
         wcscpy(label, L"Volume");
         swprintf(value, 128, L"%d%%", g_opt.volume);
         break;
+    case IT_MOUSE_SENS:
+        wcscpy(label, ui_text(L"Sensibilidade do mouse", L"Mouse sensitivity"));
+        swprintf(value, 128, L"%d%%", g_opt.mouse_sens);
+        break;
+    case IT_MOUSE_INV:
+        wcscpy(label, ui_text(L"Inverter eixo vertical do mouse", L"Invert mouse vertical axis"));
+        wcscpy(value, g_opt.mouse_invert ? ui_text(L"Ligado", L"On") : ui_text(L"Desligado", L"Off"));
+        break;
     case IT_RESUME: wcscpy(label, ui_text(L"Voltar", L"Back")); break;
     case IT_RESTART: wcscpy(label, ui_text(L"Reiniciar o jogo para aplicar *", L"Restart game to apply *")); *greyed = !restart_pending(); break;
     case IT_QUIT: wcscpy(label, ui_text(L"Sair do jogo", L"Quit game")); break;
@@ -1686,6 +1907,8 @@ static const wchar_t *item_help(int it)
     case IT_UI_LANG: return ui_text(L"Idioma deste menu de configurações. A mudança é imediata.", L"Language of this settings menu. Changes apply immediately.");
     case IT_LANG: return ui_text(L"Idioma dos textos e narração do jogo.", L"Game language supported by the installed game resources.");
     case IT_VOLUME: return ui_text(L"Volume geral do jogo.", L"Overall game volume.");
+    case IT_MOUSE_SENS: return ui_text(L"Velocidade da câmera com o mouse. A opção de sensibilidade do próprio jogo soma com esta.", L"How fast the mouse turns the camera. The game's own sensitivity option adds to this one.");
+    case IT_MOUSE_INV: return ui_text(L"Mover o mouse para frente olha para baixo.", L"Moving the mouse forward looks down.");
     case IT_RESUME: return ui_text(L"Salva e volta para onde você estava.", L"Saves settings and returns to the game.");
     case IT_RESTART: return ui_text(L"Fecha e abre o jogo de novo com as opções marcadas com *.", L"Restarts the game to apply settings marked with *.");
     case IT_QUIT: return ui_text(L"Salva as configurações e fecha o jogo.", L"Saves settings and quits the game.");
