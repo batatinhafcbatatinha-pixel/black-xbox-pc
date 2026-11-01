@@ -48,7 +48,23 @@ project/kernel-handlers/
 project/supplemental*/
 **/recomp/gen/
 
+# Shared installer source and manifest
+!/.gitmodules
+!/installer.json
+!/tools/
+!/tools/port-installer
+!/.github/
+!/.github/workflows/
+
 # Local game data and installer outputs
 game_files/
 .game-install.lock
 game-install-report.json
+
+# Licenses and publication audit
+!/LICENSE
+!/licenses/
+!/kit.json
+!/tools/audit_publication.py
+# Derived from the game executable: generated on the user's machine by scripts/make_native_copies.py
+project/src/native_d3d/black_native_copies.c

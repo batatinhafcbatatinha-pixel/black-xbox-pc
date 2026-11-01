@@ -1,0 +1,9 @@
+{
+  "repo": "black-xbox-pc",
+  "audit_exempt": [
+    "scripts/make_native_copies.py",
+    "scripts/recover_boot_functions.py",
+    "scripts/recover_direct_leaves.py",
+    "scripts/recover_missing_functions.py"
+  ]
+}
