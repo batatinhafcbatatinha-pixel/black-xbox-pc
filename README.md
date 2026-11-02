@@ -23,7 +23,7 @@ Xbox pads use XInput. On Windows, `SDL3.dll` next to the executable adds every o
 
 ## Playing
 
-`Jogar-Black.cmd` starts `project\out\black_native.exe` with `game_files\` (your extracted disc).
+`Play-Black.cmd` starts `project\out\black_native.exe` with `game_files\` (your extracted disc).
 
 ### PC Settings
 

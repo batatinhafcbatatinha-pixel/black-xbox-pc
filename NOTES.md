@@ -73,7 +73,7 @@ em `analysis/`; são limiares de interrupção, não quota atômica de disco.
 - `scripts/` — Utilitários de inspeção e re-extração do ISO (`inspect_iso.py`, `extract_iso.py`).
 - `build-local.cmd` — Script de compilação com Ninja / MSVC.
 - `run-test.ps1` — Script de execução e teste do port.
-- `Jogar-Black.cmd` — Inicializador amigável.
+- `Play-Black.cmd` — Inicializador amigável.
 
 ## Integração AOT nativa — continuação
 
