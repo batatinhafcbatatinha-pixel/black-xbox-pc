@@ -3,8 +3,8 @@
 **Estado real:** investigação estática e preparação do port. `project/` ainda não
 contém runtime nem `CMakeLists.txt`; não existe build jogável validada.
 
-Use `analyze-local.cmd` para validar o executável e auditar imports.
-Use `analyze-local.cmd --disassemble` para reutilizar/gerar o banco de desmontagem,
+Use `python scripts/analyze_local.py` para validar o executável e auditar imports.
+Use `python scripts/analyze_local.py --disassemble` para reutilizar/gerar o banco de desmontagem,
 classificar candidatos e traduzir somente a entrada. A análise usa o checkout
 vizinho `xboxrecomp`, grava apenas em `analysis/` e não extrai a ISO.
 O processo verifica periodicamente reserva de 20 GiB em C: e limite de 768 MiB
@@ -74,7 +74,6 @@ em `analysis/`; são limiares de interrupção, não quota atômica de disco.
 - `build-local.cmd` — Script de compilação com Ninja / MSVC.
 - `run-test.ps1` — Script de execução e teste do port.
 - `Jogar-Black.cmd` — Inicializador amigável.
-- `CONTINUACAO.md` — Log de progresso e próximos passos técnicos.
 
 ## Integração AOT nativa — continuação
 

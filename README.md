@@ -19,7 +19,7 @@ Early work on a port of the original-Xbox game *Black* (USA), built through ahea
 
 ## Controllers
 
-Xbox pads use XInput. On Windows, `SDL3.dll` next to the executable adds every other pad SDL knows: DualShock 3/4, DualSense, Switch pads, USB adapters for PS2 and original Xbox pads. `tools/build_local.py` downloads it with `gamecontrollerdb.txt` (both zlib license); `tools/fetch_pad_support.py` does the same for a manual build. Without those files the port behaves as before. No PlayStation pad or adapter has been tried on real hardware yet.
+Xbox pads use XInput. On Windows, `SDL3.dll` next to the executable adds every other pad SDL knows: DualShock 3/4, DualSense, Switch pads, USB adapters for PS2 and original Xbox pads. `tools/build_local.py` downloads it with `gamecontrollerdb.txt` (both zlib license); `tools/fetch_pad_support.py` does the same for a manual build. Without those files the port behaves as before. No PlayStation pad or adapter has been tried on real hardware yet. **Controller vibration** in the F1 settings turns the pad's vibration off.
 
 ## Playing
 
@@ -65,7 +65,7 @@ Menus on the keyboard: arrows or W A S D, Enter/Space = confirm, Esc = back. `bl
 `BLACK_SKIP_MOVIES=1` ends every pre-rendered movie at once (F10 or A skips one in normal play);
 `RECOMP_PAD_SCRIPT` / `RECOMP_PAD_LIVE` drive the pad; `RECOMP_FB_DUMP=<prefix> RECOMP_HLE_DUMP_EVERY=<n>` save frames.
 Diagnostics (`BLACK_GPU_TRACE_EVERY`, `BLACK_PB_DUMP`, `BLACK_VSH_DUMP`, `BLACK_WATCH`, `BLACK_MEMSNAP`) are
-described in [CONTINUACAO.md](CONTINUACAO.md).
+not documented here yet.
 
 ### Linux
 
@@ -101,7 +101,7 @@ Experimental and not compiled or run yet: see [MACOS.md](MACOS.md).
 - `scripts/` — ISO inspection/extraction, game-file verification, analysis pipeline, boot/leaf/missing-function recovery, native-instruction lowering and GPU wrapper generation.
 - `config/` — XBE configuration and runtime targets.
 - `project/` — CMake project, integration code, the native D3D/DirectSound/input replacements (`src/native_d3d/`) and the native renderer with PC Settings (`src/native_gpu/`); translated game code (`src/recomp/gen`) is not included.
-- [NOTES.md](NOTES.md) and [CONTINUACAO.md](CONTINUACAO.md) — development log and native plan (in Portuguese).
+- [NOTES.md](NOTES.md) — development log (in Portuguese).
 - `xboxrecomp/` — the toolkit, as a submodule: [batatinhafcbatatinha-pixel/xboxrecomp](https://github.com/batatinhafcbatatinha-pixel/xboxrecomp),
   branch `ports`. Clone with `git clone --recursive` (or run `git submodule update --init` afterwards). Without the
   submodule, the scripts and CMake fall back to an `xboxrecomp` checkout next to this folder.

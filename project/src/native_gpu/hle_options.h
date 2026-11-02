@@ -22,6 +22,7 @@ typedef struct HleOptions {
     int adapter;      /* -1 system default, else DXGI adapter index  (restart) */
     int language;     /* EEPROM language: 1 English, 5 Spanish        (restart) */
     int volume;       /* 0..100 */
+    int vibration;    /* controller rumble */
     int ui_language;  /* 0 Portuguese, 1 English (applies immediately) */
     int mouse_sens;   /* mouse look sensitivity, percent (10..500) */
     int mouse_invert; /* invert the mouse's vertical axis */

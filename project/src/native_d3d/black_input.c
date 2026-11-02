@@ -13,6 +13,7 @@
  */
 #include "black_win32.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "black_native.h"
 
@@ -127,8 +128,43 @@ void sub_0027DDEC(void)                  /* XInputClose */
 
 /* XINPUT_STATE: dwPacketNumber, then XINPUT_GAMEPAD = report bytes 2..19; the packet number moves only when the
  * state does, as on the console. */
+/* The F1 menu lives in another module and publishes its vibration option as a process variable. The game may
+ * not call again while a motor runs, so a change also stops or restarts the motors. */
+static int s_vibration_off;
+
+static void vibration_refresh(void)
+{
+    static unsigned polls;
+    int off, port;
+    if (polls++ & 31)
+        return;
+#ifdef _WIN32
+    {
+        char v[8] = "";
+        GetEnvironmentVariableA("XBOX_VIBRATION_OFF", v, sizeof v);
+        off = v[0] == '1';
+    }
+#else
+    {
+        const char *e = getenv("XBOX_VIBRATION_OFF");
+        off = e && e[0] == '1';
+    }
+#endif
+    if (off == s_vibration_off)
+        return;
+    s_vibration_off = off;
+    for (port = 0; port < NPORTS; port++)
+        if (s_port[port].open && (s_port[port].rumble_l || s_port[port].rumble_r)) {
+            HostVibration v;
+            v.left = off ? 0 : s_port[port].rumble_l;
+            v.right = off ? 0 : s_port[port].rumble_r;
+            xbox_InputSetState((DWORD)port, &v);
+        }
+}
+
 void sub_0027DDF8(void)                  /* XInputGetState */
 {
+    vibration_refresh();
     uint8_t rep[20];
     uint32_t st = black_arg(1);
     int port = handle_port(black_arg(0));
@@ -171,7 +207,8 @@ void sub_0027DE6B(void)                  /* XInputSetState */
         if (v.left != p->rumble_l || v.right != p->rumble_r) {
             p->rumble_l = v.left;
             p->rumble_r = v.right;
-            xbox_InputSetState((DWORD)port, &v);
+            if (!s_vibration_off)
+                xbox_InputSetState((DWORD)port, &v);
         }
     }
     MEM32(fb) = ERR_SUCCESS;

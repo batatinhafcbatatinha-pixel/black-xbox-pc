@@ -69,3 +69,6 @@ game-install-report.json
 !/tools/fetch_pad_support.py
 # Derived from the game executable: generated on the user's machine by scripts/make_native_copies.py
 project/src/native_d3d/black_native_copies.c
+
+# Notes for AI agents stay local
+/CONTINUACAO.md
