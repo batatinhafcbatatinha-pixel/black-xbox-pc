@@ -1325,6 +1325,7 @@ static void present_rt(HleSurface *rt)
             fprintf(stderr, "[HLE-PRESENT] frame failed; preserving previous display\n");
         hle_options_draw_overlay(rtv, cw, ch);
         hle_options_draw_button(rtv);
+        hle_options_draw_fps(rtv);
         ID3D11RenderTargetView_Release(rtv);
     }
     {

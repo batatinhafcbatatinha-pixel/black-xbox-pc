@@ -26,6 +26,7 @@ typedef struct HleOptions {
     int ui_language;  /* 0 Portuguese, 1 English (applies immediately) */
     int mouse_sens;   /* mouse look sensitivity, percent (10..500) */
     int mouse_invert; /* invert the mouse's vertical axis */
+    int show_fps;     /* frame-rate counter in the top left corner */
 } HleOptions;
 
 extern HleOptions g_opt;
@@ -52,6 +53,7 @@ void hle_options_draw_overlay(ID3D11RenderTargetView *rtv, UINT w, UINT h);
 /* On the game's main, options and pause menus: the "(BACK) settings"
  * button in the game's own button-hint style. */
 void hle_options_draw_button(ID3D11RenderTargetView *rtv);
+void hle_options_draw_fps(ID3D11RenderTargetView *rtv);
 /* RECOMP_OPTIONS_AUTOTEST: a back-buffer capture tag wanted at this present
  * (consumed), or NULL. */
 const char *hle_options_capture_tag(void);

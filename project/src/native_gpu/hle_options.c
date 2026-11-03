@@ -229,6 +229,7 @@ static void save_ini(void)
     ini_put(L"idioma", g_opt.language);
     ini_put(L"volume", g_opt.volume);
     ini_put(L"vibracao", g_opt.vibration);
+    ini_put(L"mostrar_fps", g_opt.show_fps);
     ini_put(L"idioma_menu", g_opt.ui_language);
     mouse_publish();
 }
@@ -334,6 +335,7 @@ void hle_options_init(void)
     }
     g_opt.volume = clampi(ini_get(L"volume", 100), 0, 100);
     g_opt.vibration = clampi(ini_get(L"vibracao", 1), 0, 1);
+    g_opt.show_fps = clampi(ini_get(L"mostrar_fps", 0), 0, 1);
     vibration_publish();
     g_opt.ui_language = clampi(ini_get(L"idioma_menu", 1), 0, 1);
 
@@ -819,7 +821,7 @@ void hle_options_apply_display(uint32_t pw, uint32_t ph)
 /* ------------------------------------------------------------ the menu */
 
 enum {
-    IT_DISPLAY, IT_MONITOR, IT_REFRESH, IT_VSYNC, IT_FPS, IT_SCALE, IT_ASPECT, IT_AA, IT_MSAA, IT_ANISO,
+    IT_DISPLAY, IT_MONITOR, IT_REFRESH, IT_VSYNC, IT_FPS, IT_SHOW_FPS, IT_SCALE, IT_ASPECT, IT_AA, IT_MSAA, IT_ANISO,
     IT_API, IT_GPU, IT_UI_LANG, IT_LANG, IT_VOLUME, IT_VIBRATION, IT_MOUSE_SENS, IT_MOUSE_INV, IT_RESUME, IT_RESTART, IT_QUIT, IT_COUNT
 };
 
@@ -963,6 +965,7 @@ static void change(int it, int d)
         break;
     case IT_VSYNC: g_opt.vsync = !g_opt.vsync; break;
     case IT_FPS: g_opt.fps = cycle(k_fps, 3, g_opt.fps, d); break;
+    case IT_SHOW_FPS: g_opt.show_fps = !g_opt.show_fps; break;
     case IT_SCALE:
         g_opt.scale = (g_opt.scale + N_RES + d) % N_RES;
         if (k_res[g_opt.scale].aspect >= 0) {
@@ -1497,6 +1500,11 @@ static void surface_resize(int pw, int ph, int lh)
  * never shipped): a 256x256 DXT3 atlas after a D3D texture header, and from 0x220 on one 40-byte record
  * per character: u, v, width, height, x offset, y offset, advance (fractions of the atlas), then the
  * Windows-1252 code. Capitals only, as the game writes its menus. */
+/* Where game_text draws: the menu's screen DIB unless a caller (the menu
+ * button, the FPS counter) points it at its own bitmap. */
+static uint32_t *s_gt_bits;
+static int s_gt_w, s_gt_h;
+
 #ifdef _WIN32
 typedef struct { float u, v, w, h, xo, yo, adv; int used; } GameGlyph;
 static struct { uint8_t *alpha; int size; GameGlyph g[256]; int tried; } s_gf;
@@ -1579,8 +1587,21 @@ static const GameGlyph *game_glyph(wchar_t c)
 /* Text height in pixels for each of the menu's four sizes. */
 static float game_font_scale(HFONT f)
 {
-    int px = f == s_font_title ? s_lh * 135 / 100 : f == s_font_small ? s_lh * 66 / 100 : s_lh * 88 / 100;
+    int px;
+    if (f == s_font_title) px = s_lh * 150 / 100;
+    else if (f == s_font_small) px = s_lh * 58 / 100;
+    else if (f == s_font || f == s_font_bold) px = s_lh * 72 / 100;   /* room between rows */
+    else {                                   /* any other font: its own height */
+        LOGFONTW lf;
+        px = GetObjectW(f, sizeof lf, &lf) ? (lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight) * 88 / 74 : 12;
+    }
     return (float)px / (0.0859375f * (float)s_gf.size);
+}
+
+/* Extra space between letters: the atlas advances alone read cramped. */
+static float game_font_tracking(float scale)
+{
+    return 0.0859375f * (float)s_gf.size * scale * 0.0f;
 }
 
 static int game_text_width(const wchar_t *s, float scale)
@@ -1589,7 +1610,7 @@ static int game_text_width(const wchar_t *s, float scale)
     for (; *s; s++) {
         const GameGlyph *g = game_glyph(*s);
         if (g)
-            w += g->adv * (float)s_gf.size * scale;
+            w += g->adv * (float)s_gf.size * scale + (s[1] ? game_font_tracking(scale) : 0.0f);
     }
     return (int)(w + 0.5f);
 }
@@ -1599,8 +1620,12 @@ static void game_text(const wchar_t *s, int x0, int y0, int x1, int y1, COLORREF
     float scale = game_font_scale(f), x, size = (float)s_gf.size;
     int width = game_text_width(s, scale), top;
     int r = GetRValue(c), g = GetGValue(c), b = GetBValue(c);
+    uint32_t *bits = s_gt_bits ? s_gt_bits : s_bits;
+    int bw = s_gt_bits ? s_gt_w : s_pw, bh = s_gt_bits ? s_gt_h : s_ph;
 
     GdiFlush();
+    if (!bits)
+        return;
     x = (float)((align & DT_RIGHT) ? x1 - width : (align & DT_CENTER) ? (x0 + x1 - width) / 2 : x0);
     top = (y0 + y1) / 2 - (int)(0.0859375f * size * scale / 2.0f);
     for (; *s; s++) {
@@ -1612,14 +1637,14 @@ static void game_text(const wchar_t *s, int x0, int y0, int x1, int y1, COLORREF
         h = (int)(gl->h * size * scale + 0.5f);
         for (py = 0; py < h; py++) {
             int dy = top + py;
-            if (dy < 0 || dy >= s_ph)
+            if (dy < 0 || dy >= bh)
                 continue;
             for (px = 0; px < w; px++) {
                 int dx = (int)x + px, sx0, sy0, a, ia;
                 float fx, fy, sx, sy, v;
                 uint32_t *d;
                 uint8_t *row;
-                if (dx < x0 || dx >= x1 || dx < 0 || dx >= s_pw)
+                if (dx < x0 || dx >= x1 || dx < 0 || dx >= bw)
                     continue;
                 sx = (gl->u + gl->w * ((float)px + 0.5f) / (float)w) * size - 0.5f;
                 sy = (gl->v + gl->h * ((float)py + 0.5f) / (float)h) * size - 0.5f;
@@ -1634,13 +1659,13 @@ static void game_text(const wchar_t *s, int x0, int y0, int x1, int y1, COLORREF
                 if (a <= 0)
                     continue;
                 ia = 255 - a;
-                d = s_bits + dy * s_pw + dx;
+                d = bits + dy * bw + dx;
                 *d = (((((*d >> 16) & 255) * ia + r * a) / 255) << 16) |
                      (((((*d >> 8) & 255) * ia + g * a) / 255) << 8) |
                      ((((*d & 255) * ia + b * a) / 255));
             }
         }
-        x += gl->adv * size * scale;
+        x += gl->adv * size * scale + game_font_tracking(scale);
     }
 }
 #endif
@@ -1832,6 +1857,10 @@ static void item_text(int it, wchar_t *label, wchar_t *value, int *greyed)
         swprintf(value, 128, L"%ls (%ux%u)", (g_opt.scale == 0 ? ui_text(L"Resolução do monitor", L"Monitor resolution") : k_res[g_opt.scale].name), (iw + 1) & ~1u, ih);
     }
         break;
+    case IT_SHOW_FPS:
+        wcscpy(label, ui_text(L"Mostrar FPS", L"Show FPS"));
+        wcscpy(value, g_opt.show_fps ? ui_text(L"Ligado", L"On") : ui_text(L"Desligado", L"Off"));
+        break;
     case IT_ASPECT:
         wcscpy(label, ui_text(L"Proporção da imagem", L"Aspect ratio"));
         wcscpy(value, k_aspect_name[g_opt.aspect]);
@@ -1910,6 +1939,7 @@ static const wchar_t *item_help(int it)
     case IT_MONITOR: return ui_text(L"Em qual monitor o jogo aparece.", L"Monitor used to display the game.");
     case IT_REFRESH: return ui_text(L"Frequência do monitor na tela cheia exclusiva.", L"Monitor refresh rate in exclusive fullscreen.");
     case IT_VSYNC: return ui_text(L"Espera o monitor para mostrar cada quadro: sem cortes na imagem, um pouco mais de atraso.", L"Synchronizes frames with the monitor to prevent tearing, with slightly more latency.");
+    case IT_SHOW_FPS: return ui_text(L"Mostra os quadros por segundo no canto da tela.", L"Shows the frames per second in the corner of the screen.");
     case IT_FPS: return ui_text(L"Limite opcional de apresentação. VSync é controlado separadamente.", L"Optional presentation limit. VSync is controlled separately.");
     case IT_SCALE: return ui_text(L"Resolução em que o jogo é desenhado: maior = imagem mais nítida, mais trabalho para a placa. Também ajusta a proporção.", L"Higher rendering resolutions give a sharper image and increase GPU load. Also adjusts aspect ratio.");
     case IT_ASPECT: return ui_text(L"4:3 é o original. As outras alargam o campo de visão para telas largas.", L"4:3 is the original. Other ratios widen the field of view for widescreen displays.");
@@ -2091,7 +2121,7 @@ void hle_options_draw_overlay(ID3D11RenderTargetView *rtv, UINT w, UINT h)
     D3D11_VIEWPORT vp;
     if (!s_open || !rtv || w < 64 || h < 64 || !overlay_resources())
         return;
-    lh = (int)h / 26;
+    lh = (int)h / 30;                          /* 21 rows + title + hints fit */
     if (lh < 12) lh = 12;
     if ((int)w != s_pw || (int)h != s_ph || lh != s_lh || !s_srv)
         surface_resize((int)w, (int)h, lh);
@@ -2150,6 +2180,9 @@ static void button_paint(int w, int h, int mask)
     int cap = h * 17 / 10, o = h / 16 + 1;
     SetRect(&r, 0, 0, w, h);
     FillRect(s_dc, &r, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    s_gt_bits = s_btn_bits;                  /* game_text: into this bitmap, not the menu's */
+    s_gt_w = w;
+    s_gt_h = h;
     SelectObject(s_dc, white);
     SelectObject(s_dc, pen);
     RoundRect(s_dc, 1, h / 5, cap, h - h / 5, h / 2, h / 2);
@@ -2162,6 +2195,7 @@ static void button_paint(int w, int h, int mask)
     DeleteObject(big);
     DeleteObject(fsmall);
     GdiFlush();
+    s_gt_bits = NULL;
 }
 
 static int button_resources(int h)
@@ -2276,6 +2310,155 @@ void hle_options_draw_button(ID3D11RenderTargetView *rtv)
     ID3D11DeviceContext_GSSetShader(g_hle.ctx, NULL, NULL, 0);
     ID3D11DeviceContext_PSSetShader(g_hle.ctx, s_ps, NULL, 0);
     ID3D11DeviceContext_PSSetShaderResources(g_hle.ctx, 0, 1, &s_btn_srv);
+    ID3D11DeviceContext_PSSetSamplers(g_hle.ctx, 0, 1, &s_samp);
+    ID3D11DeviceContext_Draw(g_hle.ctx, 3, 0);
+    {
+        ID3D11ShaderResourceView *none = NULL;
+        ID3D11DeviceContext_PSSetShaderResources(g_hle.ctx, 0, 1, &none);
+    }
+    ID3D11DeviceContext_OMSetBlendState(g_hle.ctx, NULL, NULL, 0xFFFFFFFFu);
+    ID3D11DeviceContext_OMSetRenderTargets(g_hle.ctx, 0, NULL, NULL);
+}
+
+/* ------------------------------------------------------- the FPS counter */
+
+static HBITMAP s_fps_bmp;
+static uint32_t *s_fps_bits;
+static ID3D11Texture2D *s_fps_tex;
+static ID3D11ShaderResourceView *s_fps_srv;
+static int s_fps_w, s_fps_h, s_fps_shown = -1;
+
+/* "60 FPS" in the game's capitals with its drop shadow, premultiplied like
+ * the menu button: a white coverage pass, then the colour pass. */
+static void fps_paint(int w, int h, int fps, int mask)
+{
+    HFONT f = make_font(h * 60 / 100, FW_BOLD, 0);
+    RECT r;
+    wchar_t s[32];
+    int o = h / 14 + 1;
+    swprintf(s, 32, L"%d FPS", fps);
+    SetRect(&r, 0, 0, w, h);
+    FillRect(s_dc, &r, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    SetBkMode(s_dc, TRANSPARENT);
+    s_gt_bits = s_fps_bits;
+    s_gt_w = w;
+    s_gt_h = h;
+    text(s, o + 2, o, w, h + o, mask ? RGB(255, 255, 255) : RGB(6, 10, 18), f, DT_LEFT);
+    text(s, 2, 0, w, h, mask ? RGB(255, 255, 255) : RGB(226, 232, 48), f, DT_LEFT);
+    s_gt_bits = NULL;
+    DeleteObject(f);
+    GdiFlush();
+}
+
+static int fps_resources(int h, int fps)
+{
+    BITMAPINFO bi;
+    D3D11_TEXTURE2D_DESC td;
+    D3D11_SUBRESOURCE_DATA sd;
+    uint32_t *mask;
+    int w = h * 5, i;
+    if (s_fps_srv && s_fps_h == h && s_fps_shown == fps)
+        return 1;
+    if (s_fps_srv) { ID3D11ShaderResourceView_Release(s_fps_srv); s_fps_srv = NULL; }
+    if (s_fps_tex) { ID3D11Texture2D_Release(s_fps_tex); s_fps_tex = NULL; }
+    if (s_fps_bmp && s_fps_h != h) { DeleteObject(s_fps_bmp); s_fps_bmp = NULL; s_fps_bits = NULL; }
+    if (!s_blend_pre && !button_resources(h))     /* also creates the premultiplied blend */
+        return 0;
+    if (!s_dc)
+        s_dc = CreateCompatibleDC(NULL);
+    if (!s_fps_bmp) {
+        memset(&bi, 0, sizeof bi);
+        bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        s_fps_bmp = CreateDIBSection(s_dc, &bi, DIB_RGB_COLORS, (void **)&s_fps_bits, NULL, 0);
+        if (!s_fps_bmp)
+            return 0;
+        s_fps_h = h;
+    }
+    SelectObject(s_dc, s_fps_bmp);
+    mask = (uint32_t *)malloc((size_t)w * (size_t)h * 4u);
+    if (!mask)
+        return 0;
+    fps_paint(w, h, fps, 1);
+    memcpy(mask, s_fps_bits, (size_t)w * (size_t)h * 4u);
+    fps_paint(w, h, fps, 0);
+    for (i = 0; i < w * h; i++) {
+        uint32_t m = (mask[i] >> 8) & 0xFFu;
+        s_fps_bits[i] = (s_fps_bits[i] & 0xFFFFFFu) | (m << 24);
+    }
+    free(mask);
+    if (s_bmp)
+        SelectObject(s_dc, s_bmp);
+    memset(&td, 0, sizeof td);
+    td.Width = (UINT)w;
+    td.Height = (UINT)h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    sd.pSysMem = s_fps_bits;
+    sd.SysMemPitch = (UINT)w * 4u;
+    sd.SysMemSlicePitch = 0;
+    if (FAILED(ID3D11Device_CreateTexture2D(g_hle.dev, &td, &sd, &s_fps_tex)))
+        return 0;
+    if (FAILED(ID3D11Device_CreateShaderResourceView(g_hle.dev, (ID3D11Resource *)s_fps_tex, NULL, &s_fps_srv)))
+        return 0;
+    s_fps_w = w;
+    s_fps_shown = fps;
+    return 1;
+}
+
+/* Presented frames per second, counted here (once per present) over half
+ * a second, drawn in the picture's top left corner. */
+void hle_options_draw_fps(ID3D11RenderTargetView *rtv)
+{
+    extern D3D11_VIEWPORT g_present_picture;
+    static LARGE_INTEGER freq, start;
+    static int frames, fps;
+    D3D11_VIEWPORT pic = g_present_picture, vp;
+    LARGE_INTEGER now;
+    int h;
+    if (!freq.QuadPart)
+        QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    if (!start.QuadPart)
+        start = now;
+    frames++;
+    if (now.QuadPart - start.QuadPart >= freq.QuadPart / 2) {
+        fps = (int)((double)frames * (double)freq.QuadPart / (double)(now.QuadPart - start.QuadPart) + 0.5);
+        frames = 0;
+        start = now;
+    }
+    if (!g_opt.show_fps || s_open || !rtv || pic.Height < 120.0f || !overlay_resources())
+        return;
+    h = (int)(pic.Height * 0.045f + 0.5f);
+    if (h < 12)
+        h = 12;
+    if (!fps_resources(h, fps))
+        return;
+    vp.TopLeftX = (float)(int)(pic.TopLeftX + pic.Height * 0.02f);
+    vp.TopLeftY = (float)(int)(pic.TopLeftY + pic.Height * 0.02f);
+    vp.Width = (float)s_fps_w;
+    vp.Height = (float)s_fps_h;
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    ID3D11DeviceContext_OMSetRenderTargets(g_hle.ctx, 1, &rtv, NULL);
+    ID3D11DeviceContext_RSSetViewports(g_hle.ctx, 1, &vp);
+    ID3D11DeviceContext_RSSetState(g_hle.ctx, NULL);
+    ID3D11DeviceContext_OMSetBlendState(g_hle.ctx, s_blend_pre, NULL, 0xFFFFFFFFu);
+    ID3D11DeviceContext_OMSetDepthStencilState(g_hle.ctx, NULL, 0);
+    ID3D11DeviceContext_IASetInputLayout(g_hle.ctx, NULL);
+    ID3D11DeviceContext_IASetPrimitiveTopology(g_hle.ctx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11DeviceContext_VSSetShader(g_hle.ctx, s_vs, NULL, 0);
+    ID3D11DeviceContext_GSSetShader(g_hle.ctx, NULL, NULL, 0);
+    ID3D11DeviceContext_PSSetShader(g_hle.ctx, s_ps, NULL, 0);
+    ID3D11DeviceContext_PSSetShaderResources(g_hle.ctx, 0, 1, &s_fps_srv);
     ID3D11DeviceContext_PSSetSamplers(g_hle.ctx, 0, 1, &s_samp);
     ID3D11DeviceContext_Draw(g_hle.ctx, 3, 0);
     {
