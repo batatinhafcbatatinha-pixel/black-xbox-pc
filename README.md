@@ -127,7 +127,7 @@ Do not upload the ISO, extracted files, generated code or the built executable.
 
 ## Building by hand
 
-`Setup.cmd` ([How to play](#how-to-play)) does all of this on Windows. The steps below are for doing it yourself, or on Linux.
+`Setup.cmd` ([How to play](#how-to-play)) does all of this on Windows. The steps below are for doing it yourself, or on Linux. `Prepare-Build.cmd` does only the preparation (tools, your game, the function lists and the translation from your disc), if you want to compile by hand afterwards.
 
 ### Windows
 

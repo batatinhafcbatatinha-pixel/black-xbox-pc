@@ -16,6 +16,7 @@
     {
       "name": "Copy your executable",
       "done_if": "default.xbe",
+      "prepare": true,
       "run": [
         "{python}",
         "-c",
@@ -29,7 +30,8 @@
         "scripts/native_pipeline.py",
         "generate"
       ],
-      "done_if": "project/src/recomp/gen/recomp_funcs.h"
+      "done_if": "project/src/recomp/gen/recomp_funcs.h",
+      "prepare": true
     },
     {
       "name": "Compile",
