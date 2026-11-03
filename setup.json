@@ -1,0 +1,57 @@
+{
+  "game": "Black",
+  "disc": "original Xbox, USA",
+  "play": "Play-Black.cmd",
+  "disk_gb": 10,
+  "download_gb": 1,
+  "minutes": "30-90",
+  "tools": [
+    "llvm",
+    "cmake",
+    "ninja"
+  ],
+  "gb_per_job": 2,
+  "requirements": "requirements.txt",
+  "steps": [
+    {
+      "name": "Copy your executable",
+      "done_if": "default.xbe",
+      "run": [
+        "{python}",
+        "-c",
+        "import shutil; shutil.copy2('game_files/default.xbe', 'default.xbe')"
+      ]
+    },
+    {
+      "name": "Translate the game code",
+      "run": [
+        "{python}",
+        "scripts/native_pipeline.py",
+        "generate"
+      ],
+      "done_if": "project/src/recomp/gen/recomp_funcs.h"
+    },
+    {
+      "name": "Compile",
+      "run": [
+        "{python}",
+        "scripts/native_pipeline.py",
+        "build"
+      ],
+      "env": {
+        "BLACK_BUILD_JOBS": "{jobs}"
+      },
+      "retry_if": "project/out/build.ninja"
+    }
+  ],
+  "submodules": {
+    "tools/port-installer": {
+      "url": "https://github.com/batatinhafcbatatinha-pixel/port-installer.git",
+      "commit": "225df3dc28e697a19d5edb3ac58e0d532496619b"
+    },
+    "xboxrecomp": {
+      "url": "https://github.com/batatinhafcbatatinha-pixel/xboxrecomp.git",
+      "commit": "b27d2e85935b9aed4bf6870099657e1aac0a4d62"
+    }
+  }
+}

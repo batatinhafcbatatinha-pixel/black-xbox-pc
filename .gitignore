@@ -72,3 +72,11 @@ project/src/native_d3d/black_native_copies.c
 
 # Notes for AI agents stay local
 /CONTINUACAO.md
+
+# One-click setup (Setup.cmd): shared scripts, this game's steps, and its log
+!/setup.json
+!/requirements.txt
+!/tools/
+!/tools/setup.ps1
+!/tools/setup_tools.py
+setup-log.txt
